@@ -1,0 +1,21 @@
+[Unit]
+Description=Telegram Cover Bot - Music Search and Download Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/telegram-cover-bot
+ExecStart=/usr/bin/python3 /opt/telegram-cover-bot/bot.py
+Restart=always
+RestartSec=10
+
+# Переменные окружения
+Environment="PYTHONUNBUFFERED=1"
+
+# Логирование
+StandardOutput=append:/opt/telegram-cover-bot/logs/bot.log
+StandardError=append:/opt/telegram-cover-bot/logs/bot_error.log
+
+[Install]
+WantedBy=multi-user.target
