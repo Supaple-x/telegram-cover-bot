@@ -23,7 +23,6 @@ youtube_cookies.txt
 *_cookies.txt
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
