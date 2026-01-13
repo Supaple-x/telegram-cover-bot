@@ -131,13 +131,22 @@ class VKMusicService:
 
             tracks = []
             for i, audio in enumerate(raw_results):
-                track = self._format_vk_track(audio, i)
-                if track:
-                    tracks.append(track)
+                # Пропускаем объекты, которые не являются треками
+                if isinstance(audio, dict) and 'playlist' in str(type(audio)):
+                    logger.debug(f"Skipping non-track object at index {i}")
+                    continue
+
+                try:
+                    track = self._format_vk_track(audio, i)
+                    if track:
+                        tracks.append(track)
+                except Exception as track_error:
+                    logger.warning(f"Failed to format track at index {i}: {track_error}")
+                    continue
 
             return tracks
         except Exception as e:
-            logger.error(f"VK _search_sync error: {e}")
+            logger.error(f"VK _search_sync error: {e}", exc_info=True)
             return []
 
     async def download(self, track_info: Dict[str, Any], output_path: str) -> bool:
@@ -269,6 +278,21 @@ class VKMusicService:
             Отформатированный словарь с данными трека
         """
         try:
+            # Проверяем, что это трек, а не плейлист или другой объект
+            if not isinstance(audio, dict):
+                logger.debug(f"Skipping non-dict object at index {index}")
+                return None
+
+            # Пропускаем плейлисты - у них есть ключ 'playlist' вместо 'artist'
+            if 'playlist' in audio or 'playlists' in audio:
+                logger.debug(f"Skipping playlist object at index {index}")
+                return None
+
+            # Пропускаем объекты без базовых полей трека
+            if 'artist' not in audio or 'title' not in audio:
+                logger.debug(f"Skipping object without artist/title at index {index}")
+                return None
+
             if not audio.get('url'):
                 logger.warning(f"VK track {index} has no URL, skipping")
                 return None
@@ -296,6 +320,9 @@ class VKMusicService:
                 'track_id': track_id
             }
 
+        except KeyError as e:
+            logger.warning(f"Missing key in VK track at index {index}: {e}")
+            return None
         except Exception as e:
-            logger.warning(f"Error formatting VK track: {e}")
+            logger.warning(f"Error formatting VK track at index {index}: {e}")
             return None
