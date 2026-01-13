@@ -4,7 +4,6 @@ import os
 from typing import List, Dict, Any, Optional
 import aiohttp
 import vk_api
-from vk_api.audio import VkAudio
 from vk_api.exceptions import AuthError, Captcha
 
 from config import VK_TOKEN, VK_LOGIN, VK_PASSWORD
@@ -15,7 +14,6 @@ class VKMusicService:
     def __init__(self):
         """Инициализация VK API с токеном или логином/паролем"""
         self.vk_session = None
-        self.vk_audio = None
         self.vk = None  # VK API object for direct calls
         self.is_authenticated = False
         self.auth_error_message = None
@@ -26,7 +24,6 @@ class VKMusicService:
                 logger.info("Using VK token for authentication")
                 self.vk_session = vk_api.VkApi(token=VK_TOKEN)
                 self.vk = self.vk_session.get_api()
-                self.vk_audio = VkAudio(self.vk_session)
                 self.is_authenticated = True
                 logger.info("VK Music service initialized successfully with token")
                 return
@@ -42,7 +39,6 @@ class VKMusicService:
                 )
                 self.vk_session.auth()
                 self.vk = self.vk_session.get_api()
-                self.vk_audio = VkAudio(self.vk_session)
                 self.is_authenticated = True
                 logger.info("VK Music service initialized successfully with login/password")
                 return
@@ -265,18 +261,21 @@ class VKMusicService:
                 logger.error("Missing owner_id or track_id for URL refresh")
                 return None
 
-            # Получаем свежий URL через audio.get_by_id
-            fresh_audio = await asyncio.get_event_loop().run_in_executor(
+            # Получаем свежий URL через прямой API вызов
+            audio_id = f"{owner_id}_{track_id}"
+            fresh_audios = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.vk_audio.get_audio_by_id(owner_id, track_id)
+                lambda: self.vk.audio.getById(audios=[audio_id])
             )
 
-            if fresh_audio and fresh_audio.get('url'):
-                logger.info("Successfully refreshed VK track URL")
-                return fresh_audio.get('url')
-            else:
-                logger.error("Failed to get fresh URL from VK")
-                return None
+            if fresh_audios and len(fresh_audios) > 0:
+                fresh_audio = fresh_audios[0]
+                if fresh_audio.get('url'):
+                    logger.info("Successfully refreshed VK track URL")
+                    return fresh_audio.get('url')
+
+            logger.error("Failed to get fresh URL from VK")
+            return None
 
         except Exception as e:
             logger.error(f"Failed to refresh VK URL: {e}")
