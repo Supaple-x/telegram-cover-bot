@@ -9,7 +9,8 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 # YouTube
 YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 
-# VK
+# VK (Token has priority over login/password)
+VK_TOKEN = os.getenv('VK_TOKEN')
 VK_LOGIN = os.getenv('VK_LOGIN')
 VK_PASSWORD = os.getenv('VK_PASSWORD')
 

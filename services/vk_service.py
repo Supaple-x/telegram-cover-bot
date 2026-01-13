@@ -7,41 +7,46 @@ import vk_api
 from vk_api.audio import VkAudio
 from vk_api.exceptions import AuthError, Captcha
 
-from config import VK_LOGIN, VK_PASSWORD
+from config import VK_TOKEN, VK_LOGIN, VK_PASSWORD
 
 logger = logging.getLogger(__name__)
 
 class VKMusicService:
     def __init__(self):
-        """Инициализация VK API с логином/паролем"""
+        """Инициализация VK API с токеном или логином/паролем"""
         self.vk_session = None
         self.vk_audio = None
         self.is_authenticated = False
         self.auth_error_message = None
 
-        # Проверяем наличие учетных данных
-        if not VK_LOGIN or not VK_PASSWORD:
-            logger.error("VK_LOGIN or VK_PASSWORD not set in environment variables")
-            self.auth_error_message = "VK credentials not configured"
-            return
-
         try:
-            # Создаем сессию с обработчиком 2FA
-            self.vk_session = vk_api.VkApi(
-                login=VK_LOGIN,
-                password=VK_PASSWORD,
-                auth_handler=self._auth_handler,
-                captcha_handler=self._captcha_handler
-            )
+            # Приоритет 1: Используем токен если доступен
+            if VK_TOKEN:
+                logger.info("Using VK token for authentication")
+                self.vk_session = vk_api.VkApi(token=VK_TOKEN)
+                self.vk_audio = VkAudio(self.vk_session)
+                self.is_authenticated = True
+                logger.info("VK Music service initialized successfully with token")
+                return
 
-            # Выполняем аутентификацию
-            self.vk_session.auth()
+            # Приоритет 2: Используем логин/пароль
+            if VK_LOGIN and VK_PASSWORD:
+                logger.info("Using VK login/password for authentication")
+                self.vk_session = vk_api.VkApi(
+                    login=VK_LOGIN,
+                    password=VK_PASSWORD,
+                    auth_handler=self._auth_handler,
+                    captcha_handler=self._captcha_handler
+                )
+                self.vk_session.auth()
+                self.vk_audio = VkAudio(self.vk_session)
+                self.is_authenticated = True
+                logger.info("VK Music service initialized successfully with login/password")
+                return
 
-            # Получаем доступ к VkAudio
-            self.vk_audio = VkAudio(self.vk_session)
-
-            self.is_authenticated = True
-            logger.info("VK Music service initialized successfully")
+            # Нет credentials
+            logger.error("Neither VK_TOKEN nor VK_LOGIN/VK_PASSWORD are set")
+            self.auth_error_message = "VK credentials not configured"
 
         except AuthError as e:
             logger.error(f"VK authentication failed: {e}")
