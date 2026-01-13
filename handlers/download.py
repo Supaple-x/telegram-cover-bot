@@ -243,8 +243,14 @@ def get_download_service(source: str):
     elif source == "soundcloud":
         return SoundCloudService()
     elif source == "vk_music":
-        # TODO: Реализовать VK Music сервис
-        return None
+        from services.vk_service import VKMusicService
+        service = VKMusicService()
+
+        if not service.is_authenticated:
+            logger.error(f"VK Music not authenticated: {service.auth_error_message}")
+            return None
+
+        return service
     elif source == "yandex_music":
         # TODO: Реализовать Yandex Music сервис
         return None

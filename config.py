@@ -10,7 +10,8 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 
 # VK
-VK_TOKEN = os.getenv('VK_TOKEN')
+VK_LOGIN = os.getenv('VK_LOGIN')
+VK_PASSWORD = os.getenv('VK_PASSWORD')
 
 # Yandex Music
 YANDEX_MUSIC_TOKEN = os.getenv('YANDEX_MUSIC_TOKEN')

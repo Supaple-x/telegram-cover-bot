@@ -155,8 +155,14 @@ async def perform_search(source: str, query: str) -> list:
             service = SoundCloudService()
             return await service.search(query)
         elif source == "vk_music":
-            # TODO: Реализовать VK Music поиск
-            return []
+            from services.vk_service import VKMusicService
+            service = VKMusicService()
+
+            if not service.is_authenticated:
+                logger.error(f"VK Music not authenticated: {service.auth_error_message}")
+                return []
+
+            return await service.search(query)
         elif source == "yandex_music":
             # TODO: Реализовать Yandex Music поиск
             return []
