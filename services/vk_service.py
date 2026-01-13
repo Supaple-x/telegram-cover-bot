@@ -1,165 +1,185 @@
 import asyncio
 import logging
 import os
+import json
+import re
 from typing import List, Dict, Any, Optional
+from http.cookiejar import MozillaCookieJar
 import aiohttp
-import vk_api
-from vk_api.exceptions import AuthError, Captcha
-
-from config import VK_TOKEN, VK_LOGIN, VK_PASSWORD
+from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
 class VKMusicService:
     def __init__(self):
-        """Инициализация VK API с токеном или логином/паролем"""
-        self.vk_session = None
-        self.vk = None  # VK API object for direct calls
+        """Инициализация VK Music через cookies"""
+        self.cookies = {}
         self.is_authenticated = False
         self.auth_error_message = None
+        self.session = None
+
+        # Путь к файлу cookies
+        cookies_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'vk_cookies.txt')
 
         try:
-            # Приоритет 1: Используем токен если доступен
-            if VK_TOKEN:
-                logger.info("Using VK token for authentication")
-                self.vk_session = vk_api.VkApi(token=VK_TOKEN)
-                self.vk = self.vk_session.get_api()
+            if os.path.exists(cookies_path):
+                logger.info("Loading VK cookies from file")
+                self._load_cookies(cookies_path)
                 self.is_authenticated = True
-                logger.info("VK Music service initialized successfully with token")
-                return
-
-            # Приоритет 2: Используем логин/пароль
-            if VK_LOGIN and VK_PASSWORD:
-                logger.info("Using VK login/password for authentication")
-                self.vk_session = vk_api.VkApi(
-                    login=VK_LOGIN,
-                    password=VK_PASSWORD,
-                    auth_handler=self._auth_handler,
-                    captcha_handler=self._captcha_handler
-                )
-                self.vk_session.auth()
-                self.vk = self.vk_session.get_api()
-                self.is_authenticated = True
-                logger.info("VK Music service initialized successfully with login/password")
-                return
-
-            # Нет credentials
-            logger.error("Neither VK_TOKEN nor VK_LOGIN/VK_PASSWORD are set")
-            self.auth_error_message = "VK credentials not configured"
-
-        except AuthError as e:
-            logger.error(f"VK authentication failed: {e}")
-            self.auth_error_message = f"Authentication failed: {e}"
+                logger.info("VK Music service initialized successfully with cookies")
+            else:
+                logger.error(f"VK cookies file not found: {cookies_path}")
+                self.auth_error_message = "VK cookies file not found"
         except Exception as e:
             logger.error(f"VK Music initialization error: {e}")
             self.auth_error_message = f"Initialization error: {e}"
 
-    def _auth_handler(self):
-        """
-        Обработчик двухфакторной аутентификации.
-        В production окружении код должен вводиться пользователем.
-        """
-        logger.warning("VK 2FA required but cannot be handled automatically")
-        logger.warning("Please disable 2FA or implement interactive 2FA input")
+    def _load_cookies(self, cookies_path: str):
+        """Загружает cookies из файла Netscape format"""
+        try:
+            jar = MozillaCookieJar(cookies_path)
+            jar.load(ignore_discard=True, ignore_expires=True)
 
-        # Для автоматизированного окружения возвращаем пустой код
-        # В реальности нужно реализовать интерактивный ввод
-        key = input("Enter 2FA code from SMS: ")
-        remember_device = True
-        return key, remember_device
+            # Конвертируем в словарь для aiohttp
+            for cookie in jar:
+                self.cookies[cookie.name] = cookie.value
 
-    def _captcha_handler(self, captcha):
-        """
-        Обработчик капчи.
-        В production окружении капча должна решаться пользователем или сервисом.
-        """
-        logger.error(f"VK Captcha required: {captcha.get_url()}")
-        logger.error("Captcha handling not implemented. Consider using anti-captcha service.")
+            logger.info(f"Loaded {len(self.cookies)} cookies from file")
+        except Exception as e:
+            logger.error(f"Failed to load cookies: {e}")
+            raise
 
-        # Поднимаем исключение, чтобы прервать операцию
-        raise Captcha(captcha.sid, captcha)
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Получает или создает aiohttp сессию с cookies"""
+        if self.session is None or self.session.closed:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept-Encoding': 'gzip, deflate',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
+
+            cookie_jar = aiohttp.CookieJar()
+            self.session = aiohttp.ClientSession(
+                headers=headers,
+                cookie_jar=cookie_jar,
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
+
+            # Добавляем cookies в сессию
+            for name, value in self.cookies.items():
+                self.session.cookie_jar.update_cookies({name: value}, response_url=aiohttp.URL('https://vk.com'))
+
+        return self.session
 
     async def search(self, query: str, max_results: int = 50) -> List[Dict[str, Any]]:
         """
-        Поиск треков в VK Music
+        Поиск треков в VK Music через web-интерфейс
 
         Args:
             query: Поисковый запрос
             max_results: Максимальное количество результатов
 
         Returns:
-            Список треков в формате:
-            [{
-                'id': str,
-                'title': str,
-                'artist': str,
-                'duration': int,
-                'quality': str,
-                'source': str,
-                'url': str,
-                'owner_id': int,
-                'track_id': int
-            }]
+            Список треков
         """
         if not self.is_authenticated:
             logger.error(f"VK Music search failed: {self.auth_error_message}")
             return []
 
         try:
-            # Выполняем поиск в отдельном потоке (vk_api синхронный)
-            tracks = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self._search_sync(query, max_results)
-            )
+            session = await self._get_session()
 
-            logger.info(f"VK Music search for '{query}' returned {len(tracks)} results")
-            return tracks
+            # Используем VK Mobile API endpoint для поиска аудио
+            # Этот endpoint работает через cookies и не требует токена
+            search_url = f"https://m.vk.com/audio?act=search&q={query}"
 
-        except Captcha as e:
-            logger.error(f"VK Music search blocked by captcha: {e}")
-            return []
+            logger.info(f"Searching VK Music for: {query}")
+
+            async with session.get(search_url) as response:
+                if response.status != 200:
+                    logger.error(f"VK search failed with status {response.status}")
+                    return []
+
+                html = await response.text()
+
+                # Парсим аудио из HTML
+                tracks = self._parse_audio_from_html(html)
+
+                # Ограничиваем количество результатов
+                tracks = tracks[:max_results]
+
+                logger.info(f"VK Music search for '{query}' returned {len(tracks)} results")
+                return tracks
+
         except Exception as e:
-            logger.error(f"VK Music search error: {e}")
+            logger.error(f"VK Music search error: {e}", exc_info=True)
             return []
 
-    def _search_sync(self, query: str, max_results: int) -> List[Dict[str, Any]]:
-        """Синхронный поиск (вызывается через executor)"""
+    def _parse_audio_from_html(self, html: str) -> List[Dict[str, Any]]:
+        """
+        Парсит аудио из HTML страницы VK
+
+        Args:
+            html: HTML страницы с результатами поиска
+
+        Returns:
+            Список треков
+        """
+        tracks = []
+
         try:
-            # Используем прямой API вызов для поиска
-            # audio.search возвращает словарь с ключом 'items'
-            response = self.vk.audio.search(
-                q=query,
-                count=min(max_results, 300),  # VK ограничивает до 300
-                auto_complete=1
-            )
+            # Ищем JavaScript объекты с данными аудио
+            # VK хранит данные в формате: AudioPage.init(...)
+            pattern = r'data-audio="([^"]+)"'
+            matches = re.findall(pattern, html)
 
-            if not response or 'items' not in response:
-                logger.warning(f"VK search returned no items for query: {query}")
-                return []
-
-            raw_results = response['items']
-            logger.info(f"VK API returned {len(raw_results)} items for query: {query}")
-
-            tracks = []
-            for i, audio in enumerate(raw_results):
-                # Пропускаем объекты, которые не являются треками
-                if not isinstance(audio, dict):
-                    logger.debug(f"Skipping non-dict object at index {i}")
-                    continue
-
+            for i, match in enumerate(matches):
                 try:
-                    track = self._format_vk_track(audio, i)
-                    if track:
-                        tracks.append(track)
-                except Exception as track_error:
-                    logger.warning(f"Failed to format track at index {i}: {track_error}")
+                    # Декодируем HTML entities
+                    audio_data = match.replace('&quot;', '"').replace('&amp;', '&')
+                    audio_parts = audio_data.split(',')
+
+                    if len(audio_parts) < 3:
+                        continue
+
+                    # Формат: owner_id,audio_id,url,title,artist,duration,...
+                    owner_id = audio_parts[0]
+                    audio_id = audio_parts[1]
+                    url = audio_parts[2] if len(audio_parts) > 2 else ''
+                    artist = audio_parts[4] if len(audio_parts) > 4 else 'Unknown Artist'
+                    title = audio_parts[3] if len(audio_parts) > 3 else 'Unknown Title'
+                    duration = int(audio_parts[5]) if len(audio_parts) > 5 and audio_parts[5].isdigit() else 0
+
+                    if not url:
+                        continue
+
+                    track = {
+                        'id': f"{owner_id}_{audio_id}",
+                        'title': title,
+                        'artist': artist,
+                        'duration': duration,
+                        'quality': 'MP3',
+                        'source': 'vk_music',
+                        'url': url,
+                        'owner_id': owner_id,
+                        'track_id': audio_id
+                    }
+
+                    tracks.append(track)
+                    logger.debug(f"Parsed track: {artist} - {title}")
+
+                except Exception as e:
+                    logger.warning(f"Failed to parse audio at index {i}: {e}")
                     continue
 
-            logger.info(f"Formatted {len(tracks)} tracks from VK search")
-            return tracks
         except Exception as e:
-            logger.error(f"VK _search_sync error: {e}", exc_info=True)
-            return []
+            logger.error(f"Failed to parse audio from HTML: {e}")
+
+        return tracks
 
     async def download(self, track_info: Dict[str, Any], output_path: str) -> bool:
         """
@@ -178,25 +198,15 @@ class VKMusicService:
                 logger.error("No URL provided for VK download")
                 return False
 
-            # Проверяем, что URL все еще актуален
-            # VK URLs действуют ограниченное время
+            session = await self._get_session()
 
-            # Скачиваем файл через aiohttp
-            success = await self._download_from_url(track_url, output_path)
+            # Скачиваем файл
+            success = await self._download_from_url(session, track_url, output_path)
 
             if success:
                 logger.info(f"Successfully downloaded from VK: {track_info.get('title', 'Unknown')}")
                 return True
             else:
-                # Пробуем обновить URL и скачать заново
-                logger.warning("Download failed, attempting to refresh URL...")
-                fresh_url = await self._refresh_track_url(track_info)
-                if fresh_url:
-                    success = await self._download_from_url(fresh_url, output_path)
-                    if success:
-                        logger.info("Successfully downloaded after URL refresh")
-                        return True
-
                 logger.error(f"Failed to download from VK: {track_info.get('title', 'Unknown')}")
                 return False
 
@@ -204,11 +214,12 @@ class VKMusicService:
             logger.error(f"VK download error for {track_info.get('title', 'Unknown')}: {e}")
             return False
 
-    async def _download_from_url(self, url: str, output_path: str) -> bool:
+    async def _download_from_url(self, session: aiohttp.ClientSession, url: str, output_path: str) -> bool:
         """
         Скачивает файл по URL асинхронно
 
         Args:
+            session: aiohttp сессия
             url: Прямая ссылка на MP3 файл
             output_path: Путь для сохранения
 
@@ -216,18 +227,15 @@ class VKMusicService:
             True если успешно
         """
         try:
-            timeout = aiohttp.ClientTimeout(total=300)  # 5 минут
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to download: HTTP {response.status}")
+                    return False
 
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        logger.error(f"Failed to download: HTTP {response.status}")
-                        return False
-
-                    # Скачиваем файл по частям
-                    with open(output_path, 'wb') as f:
-                        async for chunk in response.content.iter_chunked(8192):
-                            f.write(chunk)
+                # Скачиваем файл по частям
+                with open(output_path, 'wb') as f:
+                    async for chunk in response.content.iter_chunked(8192):
+                        f.write(chunk)
 
             # Проверяем, что файл создан и не пустой
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
@@ -243,105 +251,15 @@ class VKMusicService:
             logger.error(f"Download error: {e}")
             return False
 
-    async def _refresh_track_url(self, track_info: Dict[str, Any]) -> Optional[str]:
-        """
-        Обновляет URL трека если он истек
+    async def close(self):
+        """Закрывает aiohttp сессию"""
+        if self.session and not self.session.closed:
+            await self.session.close()
 
-        Args:
-            track_info: Информация о треке с owner_id и track_id
-
-        Returns:
-            Новый URL или None при ошибке
-        """
-        try:
-            owner_id = track_info.get('owner_id')
-            track_id = track_info.get('track_id')
-
-            if not owner_id or not track_id:
-                logger.error("Missing owner_id or track_id for URL refresh")
-                return None
-
-            # Получаем свежий URL через прямой API вызов
-            audio_id = f"{owner_id}_{track_id}"
-            fresh_audios = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.vk.audio.getById(audios=[audio_id])
-            )
-
-            if fresh_audios and len(fresh_audios) > 0:
-                fresh_audio = fresh_audios[0]
-                if fresh_audio.get('url'):
-                    logger.info("Successfully refreshed VK track URL")
-                    return fresh_audio.get('url')
-
-            logger.error("Failed to get fresh URL from VK")
-            return None
-
-        except Exception as e:
-            logger.error(f"Failed to refresh VK URL: {e}")
-            return None
-
-    def _format_vk_track(self, audio: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
-        """
-        Форматирует результат поиска VK в единый формат
-
-        Args:
-            audio: Словарь с данными трека от VK API
-            index: Индекс трека в результатах
-
-        Returns:
-            Отформатированный словарь с данными трека
-        """
-        try:
-            # Проверяем, что это трек, а не плейлист или другой объект
-            if not isinstance(audio, dict):
-                logger.debug(f"Skipping non-dict object at index {index}")
-                return None
-
-            # Пропускаем плейлисты - у них есть ключ 'playlist' вместо 'artist'
-            if 'playlist' in audio or 'playlists' in audio:
-                logger.debug(f"Skipping playlist object at index {index}")
-                return None
-
-            # Пропускаем объекты без базовых полей трека
-            if 'artist' not in audio or 'title' not in audio:
-                logger.debug(f"Skipping object without artist/title at index {index}")
-                return None
-
-            # Проверяем наличие URL - некоторые треки могут не иметь URL из-за ограничений
-            url = audio.get('url', '')
-            if not url:
-                logger.debug(f"VK track {index} '{audio.get('artist')} - {audio.get('title')}' has no URL, skipping")
-                return None
-
-            # Извлекаем данные
-            track_id = audio.get('id', index)
-            owner_id = audio.get('owner_id', 0)
-            artist = audio.get('artist', 'Unknown Artist')
-            title = audio.get('title', 'Unknown Title')
-            duration = audio.get('duration', 0)
-
-            # Создаем уникальный ID
-            unique_id = f"{owner_id}_{track_id}"
-
-            track_data = {
-                'id': unique_id,
-                'title': title,
-                'artist': artist,
-                'duration': duration,
-                'quality': 'MP3 320kbps',
-                'source': 'vk_music',
-                'url': url,
-                'owner_id': owner_id,
-                'track_id': track_id
-            }
-
-            logger.debug(f"Formatted track {index}: {artist} - {title}")
-            return track_data
-
-        except KeyError as e:
-            logger.warning(f"Missing key in VK track at index {index}: {e}")
-            return None
-        except Exception as e:
-            logger.warning(f"Error formatting VK track at index {index}: {e}")
-            return None
+    def __del__(self):
+        """Деструктор для закрытия сессии"""
+        if self.session and not self.session.closed:
+            try:
+                asyncio.get_event_loop().run_until_complete(self.session.close())
+            except:
+                pass
