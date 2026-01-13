@@ -80,11 +80,12 @@ async def handle_source_selection(callback: CallbackQuery, state: FSMContext):
     
     try:
         # Выполняем поиск
-        tracks = await perform_search(source, query)
-        
+        tracks, error_details = await perform_search(source, query)
+
         if not tracks:
+            # Передаем детали ошибки, если они есть
             await callback.message.edit_text(
-                format_error_message("not_found"),
+                format_error_message("not_found", error_details),
                 reply_markup=get_error_keyboard(),
                 parse_mode="Markdown"
             )
@@ -142,34 +143,40 @@ async def handle_page_navigation(callback: CallbackQuery):
         logger.error(f"Page navigation error: {e}")
         await callback.answer("❌ Ошибка навигации")
 
-async def perform_search(source: str, query: str) -> list:
-    """Выполняет поиск в указанном источнике"""
+async def perform_search(source: str, query: str):
+    """Выполняет поиск в указанном источнике
+
+    Returns:
+        tuple: (tracks, error_details) - список треков и детали ошибки (если есть)
+    """
     try:
         if source == "youtube":
             service = YouTubeService()
-            return await service.search(query)
+            return await service.search(query), None
         elif source == "youtube_music":
             service = YouTubeService()
-            return await service.search_music(query)
+            return await service.search_music(query), None
         elif source == "soundcloud":
             service = SoundCloudService()
-            return await service.search(query)
+            return await service.search(query), None
         elif source == "vk_music":
             from services.vk_service import VKMusicService
             service = VKMusicService()
 
             if not service.is_authenticated:
+                error_msg = f"VK Music: {service.auth_error_message}"
                 logger.error(f"VK Music not authenticated: {service.auth_error_message}")
-                return []
+                return [], error_msg
 
-            return await service.search(query)
+            tracks = await service.search(query)
+            return tracks, None
         elif source == "yandex_music":
             # TODO: Реализовать Yandex Music поиск
-            return []
+            return [], None
         else:
             logger.warning(f"Unknown source: {source}")
-            return []
-            
+            return [], None
+
     except Exception as e:
         logger.error(f"Search error in {source}: {e}")
         raise
