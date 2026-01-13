@@ -16,6 +16,7 @@ class VKMusicService:
         """Инициализация VK API с токеном или логином/паролем"""
         self.vk_session = None
         self.vk_audio = None
+        self.vk = None  # VK API object for direct calls
         self.is_authenticated = False
         self.auth_error_message = None
 
@@ -24,6 +25,7 @@ class VKMusicService:
             if VK_TOKEN:
                 logger.info("Using VK token for authentication")
                 self.vk_session = vk_api.VkApi(token=VK_TOKEN)
+                self.vk = self.vk_session.get_api()
                 self.vk_audio = VkAudio(self.vk_session)
                 self.is_authenticated = True
                 logger.info("VK Music service initialized successfully with token")
@@ -39,6 +41,7 @@ class VKMusicService:
                     captcha_handler=self._captcha_handler
                 )
                 self.vk_session.auth()
+                self.vk = self.vk_session.get_api()
                 self.vk_audio = VkAudio(self.vk_session)
                 self.is_authenticated = True
                 logger.info("VK Music service initialized successfully with login/password")
@@ -126,14 +129,26 @@ class VKMusicService:
     def _search_sync(self, query: str, max_results: int) -> List[Dict[str, Any]]:
         """Синхронный поиск (вызывается через executor)"""
         try:
-            # Используем search для получения результатов
-            raw_results = list(self.vk_audio.search(q=query, count=max_results))
+            # Используем прямой API вызов для поиска
+            # audio.search возвращает словарь с ключом 'items'
+            response = self.vk.audio.search(
+                q=query,
+                count=min(max_results, 300),  # VK ограничивает до 300
+                auto_complete=1
+            )
+
+            if not response or 'items' not in response:
+                logger.warning(f"VK search returned no items for query: {query}")
+                return []
+
+            raw_results = response['items']
+            logger.info(f"VK API returned {len(raw_results)} items for query: {query}")
 
             tracks = []
             for i, audio in enumerate(raw_results):
                 # Пропускаем объекты, которые не являются треками
-                if isinstance(audio, dict) and 'playlist' in str(type(audio)):
-                    logger.debug(f"Skipping non-track object at index {i}")
+                if not isinstance(audio, dict):
+                    logger.debug(f"Skipping non-dict object at index {i}")
                     continue
 
                 try:
@@ -144,6 +159,7 @@ class VKMusicService:
                     logger.warning(f"Failed to format track at index {i}: {track_error}")
                     continue
 
+            logger.info(f"Formatted {len(tracks)} tracks from VK search")
             return tracks
         except Exception as e:
             logger.error(f"VK _search_sync error: {e}", exc_info=True)
@@ -293,8 +309,10 @@ class VKMusicService:
                 logger.debug(f"Skipping object without artist/title at index {index}")
                 return None
 
-            if not audio.get('url'):
-                logger.warning(f"VK track {index} has no URL, skipping")
+            # Проверяем наличие URL - некоторые треки могут не иметь URL из-за ограничений
+            url = audio.get('url', '')
+            if not url:
+                logger.debug(f"VK track {index} '{audio.get('artist')} - {audio.get('title')}' has no URL, skipping")
                 return None
 
             # Извлекаем данные
@@ -303,12 +321,11 @@ class VKMusicService:
             artist = audio.get('artist', 'Unknown Artist')
             title = audio.get('title', 'Unknown Title')
             duration = audio.get('duration', 0)
-            url = audio.get('url', '')
 
             # Создаем уникальный ID
             unique_id = f"{owner_id}_{track_id}"
 
-            return {
+            track_data = {
                 'id': unique_id,
                 'title': title,
                 'artist': artist,
@@ -319,6 +336,9 @@ class VKMusicService:
                 'owner_id': owner_id,
                 'track_id': track_id
             }
+
+            logger.debug(f"Formatted track {index}: {artist} - {title}")
+            return track_data
 
         except KeyError as e:
             logger.warning(f"Missing key in VK track at index {index}: {e}")
