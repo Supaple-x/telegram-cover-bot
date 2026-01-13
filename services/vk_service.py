@@ -6,7 +6,8 @@ import re
 from typing import List, Dict, Any, Optional
 from http.cookiejar import MozillaCookieJar
 import aiohttp
-from urllib.parse import urlencode
+from yarl import URL
+from urllib.parse import urlencode, quote
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class VKMusicService:
 
             # Добавляем cookies в сессию
             for name, value in self.cookies.items():
-                self.session.cookie_jar.update_cookies({name: value}, response_url=aiohttp.URL('https://vk.com'))
+                self.session.cookie_jar.update_cookies({name: value}, response_url=URL('https://vk.com'))
 
         return self.session
 
@@ -95,7 +96,7 @@ class VKMusicService:
 
             # Используем VK Mobile API endpoint для поиска аудио
             # Этот endpoint работает через cookies и не требует токена
-            search_url = f"https://m.vk.com/audio?act=search&q={query}"
+            search_url = f"https://m.vk.com/audio?act=search&q={quote(query)}"
 
             logger.info(f"Searching VK Music for: {query}")
 
@@ -105,6 +106,7 @@ class VKMusicService:
                     return []
 
                 html = await response.text()
+                logger.debug(f"VK HTML response length: {len(html)} characters")
 
                 # Парсим аудио из HTML
                 tracks = self._parse_audio_from_html(html)
@@ -113,6 +115,8 @@ class VKMusicService:
                 tracks = tracks[:max_results]
 
                 logger.info(f"VK Music search for '{query}' returned {len(tracks)} results")
+                if len(tracks) == 0:
+                    logger.warning(f"No tracks found in HTML. First 500 chars: {html[:500]}")
                 return tracks
 
         except Exception as e:
