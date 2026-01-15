@@ -168,8 +168,9 @@ async def perform_search(source: str, query: str):
                 logger.error(f"VK Music not authenticated: {service.auth_error_message}")
                 return [], error_msg
 
-            tracks = await service.search(query)
-            return tracks, None
+            # search возвращает кортеж (tracks, error_details)
+            tracks, error_details = await service.search(query)
+            return tracks, error_details
         elif source == "yandex_music":
             # TODO: Реализовать Yandex Music поиск
             return [], None
