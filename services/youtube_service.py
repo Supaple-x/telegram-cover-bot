@@ -118,7 +118,7 @@ class YouTubeService:
 
             logger.info(f"Starting download: {title} (ID: {video_id})")
 
-            # Настройки yt-dlp для скачивания с обходом блокировок
+            # Настройки yt-dlp с улучшенным обходом блокировок (как YTDLnis)
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': output_path.replace('.mp3', '.%(ext)s'),
@@ -129,29 +129,44 @@ class YouTubeService:
                 }],
                 'quiet': True,
                 'no_warnings': True,
-                # Дополнительные опции
+                # Обход блокировок и защиты
                 'nocheckcertificate': True,
                 'geo_bypass': True,
-                # Использовать альтернативные методы извлечения
-                'extractor_retries': 3,
-                'fragment_retries': 3,
+                'age_limit': None,
+                # Улучшенная обработка ошибок и повторных попыток
+                'extractor_retries': 5,  # Увеличено с 3 до 5
+                'fragment_retries': 5,
+                'file_access_retries': 3,
                 'skip_unavailable_fragments': True,
+                'ignoreerrors': False,  # Не игнорировать ошибки, чтобы видеть проблемы
+                # Дополнительные опции для обхода ограничений
+                'socket_timeout': 30,
+                'http_headers': {
+                    'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 13) gzip',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                },
             }
 
-            # Используем cookies если файл существует
-            # ВАЖНО: НЕ используем player_client с cookies - они несовместимы!
+            # Используем несколько стратегий обхода блокировок (как YTDLnis)
             if self.cookies_file and os.path.exists(self.cookies_file):
                 ydl_opts['cookiefile'] = self.cookies_file
                 logger.info(f"✅ Using cookies file: {self.cookies_file}")
-            else:
-                # Если нет cookies, используем Android client
+                # С cookies можем использовать более агрессивные настройки
                 ydl_opts['extractor_args'] = {
                     'youtube': {
-                        'player_client': ['android_creator'],
-                        'player_skip': ['webpage'],
+                        'player_client': ['default', 'mediaconnect', 'android'],
+                        'player_skip': ['webpage', 'configs'],
                     }
                 }
-                logger.info("Using Android client (no cookies)")
+            else:
+                # Без cookies используем множественные клиенты (как YTDLnis)
+                ydl_opts['extractor_args'] = {
+                    'youtube': {
+                        'player_client': ['android_creator', 'mediaconnect', 'android', 'ios'],
+                        'player_skip': ['webpage', 'configs'],
+                    }
+                }
+                logger.info("Using multiple player clients (no cookies): android_creator, mediaconnect, android, ios")
 
             url = f"https://www.youtube.com/watch?v={video_id}"
             logger.debug(f"Download URL: {url}")
