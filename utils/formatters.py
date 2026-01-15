@@ -66,30 +66,14 @@ def format_search_results_message(tracks: List[Dict[Any, Any]], source: str, que
     safe_query = escape_markdown(query)
     
     message = f"{emoji} **{source_name}** | Результаты для: \"{safe_query}\"\n\n"
-    
+
     if not tracks:
         message += "😔 Ничего не найдено. Попробуйте другой запрос."
         return message
-    
-    for i, track in enumerate(tracks, 1):
-        title = track.get('title', 'Unknown')
-        artist = track.get('artist', '')
 
-        # Формируем полное название трека
-        if artist:
-            full_title = f"{artist} - {title}"
-        else:
-            full_title = title
+    # Информация о количестве результатов
+    message += f"Найдено: **{len(tracks)}** треков\n"
 
-        # Обрезаем название если слишком длинное
-        if len(full_title) > 60:
-            full_title = full_title[:57] + "..."
-
-        # Экранируем для безопасного отображения в Markdown
-        safe_title = escape_markdown(full_title)
-
-        message += f"{i}️⃣ **{safe_title}**\n"
-    
     # Добавляем информацию о страницах
     if total_pages > 1:
         message += f"📄 Страница {page + 1} из {total_pages}"
