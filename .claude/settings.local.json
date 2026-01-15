@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix VK Music session initialization\n\n- Add session initialization with GET /audio before API calls\n- Remove AJAX headers from base session, add only for POST\n- Properly handle VK session tokens\n- Tested and working with fresh cookies\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(ssh root@178.156.167.178:*)",
+      "Bash(ssh:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nSwitch VK Music to token-based authentication via vk_api\n\n- Revert to vk_api library with VkAudio for stable API access\n- Use Kate Mobile token for audio permissions\n- Remove cookie-based authentication \\(unreliable with session expiry\\)\n- Update search\\(\\) to return Tuple[List, Optional[str]] format\n- Maintain async interface with sync executor for vk_api calls\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)",
+      "Bash(git restore:*)"
+    ]
+  }
+}

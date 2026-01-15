@@ -209,7 +209,9 @@ async def show_search_results(message, cache_key: str, page: int):
     # Добавляем индексы для callback_data
     for i, track in enumerate(page_tracks):
         track['page_index'] = start_idx + i
-    
+        # Логируем ID трека для отладки
+        logger.debug(f"Page track {i}: id={track.get('id')}, title={track.get('title')}")
+
     # Форматируем сообщение
     message_text = format_search_results_message(
         page_tracks, source, query, page, total_pages

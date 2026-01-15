@@ -50,7 +50,13 @@ def get_search_results_keyboard(tracks, page=0, total_pages=1, source="", query=
         if quality != 'N/A':
             button_text += f" | 🎧 {quality}"
 
-        callback_data = f"download_{source}_{track.get('id', i)}"
+        track_id = track.get('id', i)
+        callback_data = f"download_{source}_{track_id}"
+
+        # Логирование для отладки
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Button {i}: track_id={track_id}, callback_data={callback_data}")
 
         builder.row(
             InlineKeyboardButton(text=button_text, callback_data=callback_data)
