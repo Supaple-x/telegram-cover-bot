@@ -129,7 +129,7 @@ class VKMusicService:
                 return None
 
             # Создаем уникальный ID из owner_id и track_id
-            unique_id = f"{song.owner_id}_{song.id}"
+            unique_id = f"{song.owner_id}_{song.track_id}"
 
             return {
                 'id': unique_id,
@@ -140,7 +140,7 @@ class VKMusicService:
                 'source': 'vk_music',
                 'url': song.url,
                 'owner_id': song.owner_id,
-                'track_id': song.id
+                'track_id': song.track_id
             }
 
         except Exception as e:
