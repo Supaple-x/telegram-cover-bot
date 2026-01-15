@@ -159,6 +159,9 @@ class YouTubeService:
                     'youtube': {
                         'player_client': ['default', 'mediaconnect', 'android'],
                         'player_skip': ['webpage', 'configs'],
+                    },
+                    'youtubepot-bgutilhttp': {
+                        'base_url': 'http://localhost:4416'
                     }
                 }
             else:
@@ -167,6 +170,9 @@ class YouTubeService:
                     'youtube': {
                         'player_client': ['android_creator', 'mediaconnect', 'android', 'ios'],
                         'player_skip': ['webpage', 'configs'],
+                    },
+                    'youtubepot-bgutilhttp': {
+                        'base_url': 'http://localhost:4416'
                     }
                 }
                 logger.info("Using multiple player clients (no cookies): android_creator, mediaconnect, android, ios")
