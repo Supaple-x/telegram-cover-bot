@@ -120,7 +120,7 @@ class YouTubeService:
 
             # Настройки yt-dlp с улучшенным обходом блокировок (как YTDLnis)
             ydl_opts = {
-                'format': 'bestaudio/best',
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',  # Предпочитаем m4a
                 'outtmpl': output_path.replace('.mp3', '.%(ext)s'),
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
@@ -133,14 +133,17 @@ class YouTubeService:
                 'nocheckcertificate': True,
                 'geo_bypass': True,
                 'age_limit': None,
+                'force_ipv4': True,  # Принудительно IPv4
                 # Улучшенная обработка ошибок и повторных попыток
-                'extractor_retries': 5,  # Увеличено с 3 до 5
-                'fragment_retries': 5,
-                'file_access_retries': 3,
-                'skip_unavailable_fragments': True,
-                'ignoreerrors': False,  # Не игнорировать ошибки, чтобы видеть проблемы
+                'extractor_retries': 5,
+                'fragment_retries': 10,  # Увеличено с 5 до 10
+                'file_access_retries': 5,
+                'skip_unavailable_fragments': False,  # НЕ пропускаем фрагменты
+                'ignoreerrors': False,
+                'retries': 10,  # Общие retry
                 # Дополнительные опции для обхода ограничений
-                'socket_timeout': 30,
+                'socket_timeout': 60,  # Увеличено с 30 до 60
+                'http_chunk_size': 10485760,  # 10MB chunks
                 'http_headers': {
                     'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 13) gzip',
                     'Accept-Language': 'en-US,en;q=0.9',
