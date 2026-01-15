@@ -19,16 +19,16 @@ logger = logging.getLogger(__name__)
 # Хранилище активных загрузок
 active_downloads: Dict[str, Dict[str, Any]] = {}
 
-@router.callback_query(F.data.startswith("download_"))
+@router.callback_query(F.data.startswith("download::"))
 async def handle_download_request(callback: CallbackQuery, state: FSMContext):
     """Обработчик запроса на скачивание трека"""
     try:
-        # Парсим callback_data: download_source_trackid
-        parts = callback.data.split("_", 2)
+        # Парсим callback_data: download::source::trackid
+        parts = callback.data.split("::", 2)
         if len(parts) < 3:
             await callback.answer("❌ Ошибка: неверный формат запроса")
             return
-        
+
         source = parts[1]
         track_id = parts[2]
         user_id = callback.from_user.id
