@@ -81,54 +81,56 @@ async def callback_noop(callback: CallbackQuery):
     """Обработчик для кнопок без действия (например, индикатор страницы)"""
     await callback.answer()
 
-@router.message(Command("upload_cookies"))
+@router.message(Command("upload_cookies", "auth_youtube"))
 async def cmd_upload_cookies(message: Message):
-    """Обработчик команды /upload_cookies для загрузки cookies файла"""
-    global ADMIN_ID
-    
-    # Устанавливаем ID администратора при первом использовании
-    if ADMIN_ID is None:
-        ADMIN_ID = message.from_user.id
-        logger.info(f"Admin ID set to: {ADMIN_ID}")
-    
-    # Проверяем, что команду использует администратор
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ У вас нет прав для выполнения этой команды.")
-        return
-    
+    """Обработчик команды /upload_cookies и /auth_youtube для загрузки cookies файла"""
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📖 Инструкция (yt-dlp wiki)",
+            url="https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
+        )],
+        [InlineKeyboardButton(
+            text="🔗 Расширение для Chrome",
+            url="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc"
+        )],
+        [InlineKeyboardButton(
+            text="🦊 Расширение для Firefox",
+            url="https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/"
+        )]
+    ])
+
     await message.answer(
-        "🍪 **Загрузка YouTube Cookies**\n\n"
-        "Для обновления cookies:\n\n"
-        "**На смартфоне:**\n"
-        "1. Установите приложение Kiwi Browser (поддерживает расширения Chrome)\n"
-        "2. Установите расширение 'Get cookies.txt LOCALLY'\n"
-        "3. Откройте YouTube и войдите в аккаунт\n"
-        "4. Экспортируйте cookies через расширение\n"
-        "5. Отправьте файл `youtube_cookies.txt` сюда\n\n"
-        "**На компьютере:**\n"
-        "1. Установите расширение в Chrome/Firefox\n"
-        "2. Экспортируйте cookies с YouTube\n"
-        "3. Отправьте файл боту\n\n"
+        "🔐 **Авторизация YouTube Music**\n\n"
+        "Для скачивания музыки с YouTube Music нужны cookies вашего аккаунта.\n\n"
+        "**Как это работает:**\n"
+        "1️⃣ Установите расширение для браузера (ссылки ниже)\n"
+        "2️⃣ Откройте [YouTube](https://youtube.com) и войдите в аккаунт\n"
+        "3️⃣ **Важно:** Откройте в НОВОЙ вкладке инкогнито!\n"
+        "4️⃣ Перейдите на https://youtube.com/robots.txt в той же вкладке\n"
+        "5️⃣ Нажмите на расширение и экспортируйте cookies\n"
+        "6️⃣ Сохраните файл как `youtube_cookies.txt`\n"
+        "7️⃣ **ЗАКРОЙТЕ** окно инкогнито\n"
+        "8️⃣ Отправьте файл мне\n\n"
+        "⚠️ **Важно:** Экспортируйте cookies с youtube.com/robots.txt в инкогнито, "
+        "чтобы они не ротировались!\n\n"
+        "🔒 Ваши cookies **не передаются** третьим лицам и используются "
+        "только для скачивания музыки.\n\n"
         "📎 Просто отправьте файл `youtube_cookies.txt` следующим сообщением.",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+        disable_web_page_preview=True
     )
 
 @router.message(F.document)
 async def handle_document(message: Message):
     """Обработчик загрузки документов (cookies файла)"""
-    global ADMIN_ID
-    
-    # Проверяем, что файл отправляет администратор
-    if ADMIN_ID and message.from_user.id != ADMIN_ID:
-        return  # Игнорируем файлы от других пользователей
-    
     document: Document = message.document
-    
+
     # Проверяем имя файла
     if not document.file_name or 'cookies' not in document.file_name.lower():
-        await message.answer(
-            "⚠️ Пожалуйста, отправьте файл с cookies (имя должно содержать 'cookies')."
-        )
+        # Не отвечаем, чтобы не мешать другим обработчикам
         return
     
     try:
