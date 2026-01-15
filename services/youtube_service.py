@@ -150,32 +150,24 @@ class YouTubeService:
                 },
             }
 
-            # Используем несколько стратегий обхода блокировок (как YTDLnis)
+            # Используем Android Music client (обходит большинство блокировок)
+            ydl_opts['extractor_args'] = {
+                'youtube': {
+                    # android_music client обычно не требует авторизации
+                    'player_client': ['android_music', 'android', 'ios_music'],
+                    'player_skip': ['webpage', 'js', 'configs'],
+                },
+                'youtubepot-bgutilhttp': {
+                    'base_url': 'http://localhost:4416'
+                }
+            }
+
+            # Если есть cookies, добавляем их
             if self.cookies_file and os.path.exists(self.cookies_file):
                 ydl_opts['cookiefile'] = self.cookies_file
                 logger.info(f"✅ Using cookies file: {self.cookies_file}")
-                # С cookies можем использовать более агрессивные настройки
-                ydl_opts['extractor_args'] = {
-                    'youtube': {
-                        'player_client': ['default', 'mediaconnect', 'android'],
-                        'player_skip': ['webpage', 'configs'],
-                    },
-                    'youtubepot-bgutilhttp': {
-                        'base_url': 'http://localhost:4416'
-                    }
-                }
             else:
-                # Без cookies используем множественные клиенты (как YTDLnis)
-                ydl_opts['extractor_args'] = {
-                    'youtube': {
-                        'player_client': ['android_creator', 'mediaconnect', 'android', 'ios'],
-                        'player_skip': ['webpage', 'configs'],
-                    },
-                    'youtubepot-bgutilhttp': {
-                        'base_url': 'http://localhost:4416'
-                    }
-                }
-                logger.info("Using multiple player clients (no cookies): android_creator, mediaconnect, android, ios")
+                logger.info("Using android_music client without cookies")
 
             url = f"https://www.youtube.com/watch?v={video_id}"
             logger.debug(f"Download URL: {url}")
