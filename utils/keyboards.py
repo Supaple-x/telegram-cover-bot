@@ -31,16 +31,27 @@ def get_search_results_keyboard(tracks, page=0, total_pages=1, source="", query=
     
     # Добавляем кнопки для каждого трека
     for i, track in enumerate(tracks):
+        from utils.formatters import format_duration
+
         track_number = f"{i + 1}️⃣"
-        track_title = f"{track.get('title', 'Unknown')} [{track.get('duration', 'N/A')}]"
-        
-        # Обрезаем название если слишком длинное
-        if len(track_title) > 50:
-            track_title = track_title[:47] + "..."
-        
-        button_text = f"{track_number} {track_title}"
+        title = track.get('title', 'Unknown')
+        duration = format_duration(track.get('duration'))
+        quality = track.get('quality', 'N/A')
+
+        # Формируем текст кнопки: название | длительность | качество
+        button_text = f"{track_number} {title}"
+
+        # Обрезаем название если слишком длинное (оставляем место для длительности и качества)
+        if len(button_text) > 30:
+            button_text = button_text[:27] + "..."
+
+        # Добавляем длительность и качество
+        button_text += f" | ⏱️ {duration}"
+        if quality != 'N/A':
+            button_text += f" | 🎧 {quality}"
+
         callback_data = f"download_{source}_{track.get('id', i)}"
-        
+
         builder.row(
             InlineKeyboardButton(text=button_text, callback_data=callback_data)
         )

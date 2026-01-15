@@ -94,17 +94,25 @@ class VKMusicService:
             logger.info(f"vkpymusic returned {len(songs)} songs")
 
             tracks = []
+            seen_ids = set()  # Отслеживаем уникальные ID треков
+
             for i, song in enumerate(songs):
                 try:
                     track = self._format_vk_track(song, i)
                     if track:
-                        tracks.append(track)
-                        logger.debug(f"Formatted track {i}: {track.get('artist')} - {track.get('title')}")
+                        track_id = track.get('id')
+                        # Пропускаем дубликаты
+                        if track_id not in seen_ids:
+                            seen_ids.add(track_id)
+                            tracks.append(track)
+                            logger.debug(f"Formatted track {i}: {track.get('artist')} - {track.get('title')}")
+                        else:
+                            logger.debug(f"Skipping duplicate track {i}: {track_id}")
                 except Exception as track_error:
                     logger.warning(f"Failed to format track {i}: {track_error}", exc_info=True)
                     continue
 
-            logger.info(f"Successfully formatted {len(tracks)} tracks")
+            logger.info(f"Successfully formatted {len(tracks)} unique tracks (filtered from {len(songs)} total)")
             return tracks
 
         except Exception as e:

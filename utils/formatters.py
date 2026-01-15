@@ -73,23 +73,22 @@ def format_search_results_message(tracks: List[Dict[Any, Any]], source: str, que
     
     for i, track in enumerate(tracks, 1):
         title = track.get('title', 'Unknown')
-        duration = format_duration(track.get('duration'))
-        quality = track.get('quality', 'N/A')
-        
+        artist = track.get('artist', '')
+
+        # Формируем полное название трека
+        if artist:
+            full_title = f"{artist} - {title}"
+        else:
+            full_title = title
+
         # Обрезаем название если слишком длинное
-        if len(title) > 40:
-            title = title[:37] + "..."
-        
-        # Экранируем title для безопасного отображения в Markdown
-        safe_title = escape_markdown(title)
-        
+        if len(full_title) > 60:
+            full_title = full_title[:57] + "..."
+
+        # Экранируем для безопасного отображения в Markdown
+        safe_title = escape_markdown(full_title)
+
         message += f"{i}️⃣ **{safe_title}**\n"
-        message += f"   ⏱️ {duration}"
-        
-        if quality != 'N/A':
-            message += f" | 🎧 {quality}"
-        
-        message += "\n\n"
     
     # Добавляем информацию о страницах
     if total_pages > 1:

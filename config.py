@@ -23,7 +23,7 @@ DOWNLOADS_DIR = os.path.join(BASE_DIR, 'downloads')
 LOGS_DIR = os.path.join(BASE_DIR, 'logs')
 
 # Settings
-MAX_RESULTS_PER_PAGE = 10
+MAX_RESULTS_PER_PAGE = 5
 MAX_FILE_SIZE_MB = 50
 AUDIO_FORMAT = 'mp3'
 AUDIO_QUALITY = '320'

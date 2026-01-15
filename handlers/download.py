@@ -114,11 +114,21 @@ async def handle_cancel_download(callback: CallbackQuery):
 
 async def find_track_in_cache(user_id: int, source: str, track_id: str) -> Dict[str, Any]:
     """Находит информацию о треке в кэше поиска"""
+    logger.debug(f"Looking for track_id='{track_id}' for user_id={user_id}, source={source}")
+
     for cache_key, cache_data in search_cache.items():
         if cache_key.startswith(f"{user_id}_{source}_") and cache_data['source'] == source:
+            logger.debug(f"Checking cache_key: {cache_key}, tracks count: {len(cache_data['tracks'])}")
             for track in cache_data['tracks']:
-                if str(track.get('id', '')) == track_id or str(track.get('page_index', '')) == track_id:
+                track_id_str = str(track.get('id', ''))
+                page_index_str = str(track.get('page_index', ''))
+                logger.debug(f"  Track: id={track_id_str}, page_index={page_index_str}, title={track.get('title')}")
+
+                if track_id_str == track_id or page_index_str == track_id:
+                    logger.info(f"Found track in cache: {track.get('title')}")
                     return track
+
+    logger.warning(f"Track not found in cache: track_id={track_id}, user_id={user_id}, source={source}")
     return None
 
 async def download_and_send_track(message, source: str, track_info: Dict[str, Any], download_key: str):
