@@ -24,6 +24,7 @@ youtube_cookies.txt
 
 # IDE
 .idea/
+.claude/
 *.swp
 *.swo
 *~
