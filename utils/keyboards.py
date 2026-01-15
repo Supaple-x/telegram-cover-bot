@@ -35,15 +35,21 @@ def get_search_results_keyboard(tracks, page=0, total_pages=1, source="", query=
 
         track_number = f"{i + 1}️⃣"
         title = track.get('title', 'Unknown')
+        artist = track.get('artist', '')
         duration = format_duration(track.get('duration'))
         quality = track.get('quality', 'N/A')
 
-        # Формируем текст кнопки: название | длительность | качество
-        button_text = f"{track_number} {title}"
+        # Формируем текст кнопки: исполнитель - название | длительность | качество
+        if artist:
+            full_name = f"{artist} - {title}"
+        else:
+            full_name = title
+
+        button_text = f"{track_number} {full_name}"
 
         # Обрезаем название если слишком длинное (оставляем место для длительности и качества)
-        if len(button_text) > 30:
-            button_text = button_text[:27] + "..."
+        if len(button_text) > 35:
+            button_text = button_text[:32] + "..."
 
         # Добавляем длительность и качество
         button_text += f" | ⏱️ {duration}"
