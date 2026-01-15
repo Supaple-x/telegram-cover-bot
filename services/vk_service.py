@@ -20,6 +20,7 @@ class VKMusicService:
         self.auth_error_message = None
         self.session = None
         self.last_error_details = None
+        self._session_initialized = False
 
         # Путь к файлу cookies
         cookies_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'vk_cookies.txt')
@@ -60,11 +61,7 @@ class VKMusicService:
         if self.session is None or self.session.closed:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': '*/*',
                 'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': 'https://vk.com',
-                'Referer': 'https://vk.com/audio',
             }
 
             self.session = aiohttp.ClientSession(
@@ -75,7 +72,29 @@ class VKMusicService:
             for name, value in self.cookies.items():
                 self.session.cookie_jar.update_cookies({name: value}, response_url=URL('https://vk.com'))
 
+            self._session_initialized = False
+
         return self.session
+
+    async def _init_session(self):
+        """Инициализирует сессию VK, получая необходимые токены"""
+        if self._session_initialized:
+            return
+
+        try:
+            session = await self._get_session()
+
+            # Делаем GET запрос на /audio чтобы VK установил нужные cookies/токены
+            logger.debug("Initializing VK session with GET /audio")
+            async with session.get('https://vk.com/audio') as response:
+                if response.status == 200:
+                    self._session_initialized = True
+                    logger.debug("VK session initialized successfully")
+                else:
+                    logger.warning(f"VK session init returned status {response.status}")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize VK session: {e}")
 
     async def search(self, query: str, max_results: int = 50) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """
@@ -96,6 +115,9 @@ class VKMusicService:
             return [], error
 
         try:
+            # Инициализируем сессию (получаем токены от VK)
+            await self._init_session()
+
             session = await self._get_session()
             logger.info(f"Searching VK Music for: {query}")
 
@@ -110,7 +132,16 @@ class VKMusicService:
                 'q': query,
             }
 
-            async with session.post('https://vk.com/al_audio.php', data=data) as response:
+            # Заголовки для AJAX запроса
+            ajax_headers = {
+                'Accept': '*/*',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://vk.com',
+                'Referer': 'https://vk.com/audio',
+            }
+
+            async with session.post('https://vk.com/al_audio.php', data=data, headers=ajax_headers) as response:
                 if response.status != 200:
                     error = f"VK вернул статус {response.status}"
                     logger.error(error)
