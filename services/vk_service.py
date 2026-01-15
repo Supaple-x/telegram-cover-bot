@@ -103,8 +103,8 @@ class VKMusicService:
             }]
         """
         if not self.is_authenticated:
-            error_msg = f"VK не авторизован: {self.auth_error_message}"
-            logger.error(error_msg)
+            error_msg = f"Auth: {self.auth_error_message}\nToken: {VK_TOKEN[:20]}..."
+            logger.error(f"VK не авторизован: {self.auth_error_message}")
             return [], error_msg
 
         try:
@@ -116,26 +116,38 @@ class VKMusicService:
                 lambda: self._search_sync(query, max_results)
             )
 
-            logger.info(f"VK Music search for '{query}' returned {len(tracks)} results")
+            result_count = len(tracks)
+            logger.info(f"VK Music search for '{query}' returned {result_count} results")
+
+            # Если треков нет, возвращаем детальную информацию
+            if result_count == 0:
+                error_details = f"Query: '{query}'\nMax results: {max_results}\nReturned: 0 tracks\nToken valid: Yes\nAPI endpoint: VkAudio.search()"
+                return [], error_details
+
             return tracks, None
 
         except Captcha as e:
-            error_msg = f"VK Music заблокирован капчей: {e.get_url()}"
-            logger.error(error_msg)
+            error_msg = f"Captcha required\nURL: {e.get_url()}\nSID: {e.sid}"
+            logger.error(f"VK Music заблокирован капчей: {e.get_url()}")
             return [], error_msg
         except Exception as e:
-            error_msg = f"Ошибка поиска VK Music: {e}"
-            logger.error(error_msg)
+            import traceback
+            error_msg = f"Error: {type(e).__name__}\nMessage: {str(e)}\nQuery: '{query}'\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Ошибка поиска VK Music: {e}", exc_info=True)
             return [], error_msg
 
     def _search_sync(self, query: str, max_results: int) -> List[Dict[str, Any]]:
         """Синхронный поиск (вызывается через executor)"""
         try:
             # Используем search для получения результатов
+            logger.debug(f"Calling vk_audio.search with query='{query}', count={max_results}")
             raw_results = list(self.vk_audio.search(q=query, count=max_results))
+            logger.info(f"VK API returned {len(raw_results)} raw results")
 
             tracks = []
             for i, audio in enumerate(raw_results):
+                logger.debug(f"Processing result {i}: type={type(audio)}, keys={list(audio.keys()) if isinstance(audio, dict) else 'N/A'}")
+
                 # Пропускаем плейлисты и другие объекты, которые не являются треками
                 if not isinstance(audio, dict):
                     logger.debug(f"Skipping non-dict object at index {i}: {type(audio)}")
@@ -150,10 +162,14 @@ class VKMusicService:
                     track = self._format_vk_track(audio, i)
                     if track:
                         tracks.append(track)
+                        logger.debug(f"Successfully formatted track {i}: {track.get('artist')} - {track.get('title')}")
+                    else:
+                        logger.debug(f"Track {i} returned None from _format_vk_track")
                 except Exception as track_error:
-                    logger.warning(f"Failed to format track at index {i}: {track_error}")
+                    logger.warning(f"Failed to format track at index {i}: {track_error}", exc_info=True)
                     continue
 
+            logger.info(f"Successfully formatted {len(tracks)} tracks out of {len(raw_results)} raw results")
             return tracks
         except Exception as e:
             logger.error(f"VK _search_sync error: {e}", exc_info=True)

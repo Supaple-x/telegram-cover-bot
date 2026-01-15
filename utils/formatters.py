@@ -128,12 +128,13 @@ def format_error_message(error_type: str, details: str = None):
         'file_too_large': "📁 **Файл слишком большой**\n\nРазмер файла превышает 50MB. Попробуйте другой трек.",
         'unknown': "❓ **Неизвестная ошибка**"
     }
-    
+
     message = error_messages.get(error_type, error_messages['unknown'])
-    
+
     if details:
-        message += f"\n\n> **Детали:** {details}"
-    
+        # Форматируем детали в код-блок для удобного копирования
+        message += f"\n\n**🔧 Технические детали:**\n```\n{details}\n```"
+
     return message
 
 def clean_filename(filename: str):
