@@ -136,13 +136,27 @@ class VKMusicService:
 
             tracks = []
             for i, audio in enumerate(raw_results):
-                track = self._format_vk_track(audio, i)
-                if track:
-                    tracks.append(track)
+                # Пропускаем плейлисты и другие объекты, которые не являются треками
+                if not isinstance(audio, dict):
+                    logger.debug(f"Skipping non-dict object at index {i}: {type(audio)}")
+                    continue
+
+                # Проверяем, что это трек (есть обязательные поля), а не плейлист
+                if 'playlist' in str(type(audio)).lower() or not audio.get('id'):
+                    logger.debug(f"Skipping playlist or invalid object at index {i}")
+                    continue
+
+                try:
+                    track = self._format_vk_track(audio, i)
+                    if track:
+                        tracks.append(track)
+                except Exception as track_error:
+                    logger.warning(f"Failed to format track at index {i}: {track_error}")
+                    continue
 
             return tracks
         except Exception as e:
-            logger.error(f"VK _search_sync error: {e}")
+            logger.error(f"VK _search_sync error: {e}", exc_info=True)
             return []
 
     def _format_vk_track(self, audio: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
