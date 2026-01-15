@@ -68,24 +68,41 @@ class YouTubeService:
         if not self.ytmusic:
             logger.warning("YTMusic not initialized, falling back to regular YouTube search")
             return await self.search(query, max_results)
-        
+
         try:
+            logger.debug(f"Searching YouTube Music for: '{query}', max_results={max_results}")
+
             # Поиск в YouTube Music
             search_results = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.ytmusic.search(query, filter="songs", limit=max_results)
             )
-            
+
+            logger.info(f"YouTube Music API returned {len(search_results)} results")
+
             tracks = []
+            seen_ids = set()  # Отслеживаем уникальные ID треков
+
             for i, result in enumerate(search_results[:max_results]):
-                track = self._format_ytmusic_track(result, i)
-                if track:
-                    tracks.append(track)
-            
-            logger.info(f"YouTube Music search for '{query}' returned {len(tracks)} results")
+                try:
+                    track = self._format_ytmusic_track(result, i)
+                    if track:
+                        track_id = track.get('id')
+                        # Пропускаем дубликаты
+                        if track_id not in seen_ids:
+                            seen_ids.add(track_id)
+                            tracks.append(track)
+                            logger.debug(f"Formatted track {i}: {track.get('artist')} - {track.get('title')} (ID: {track_id})")
+                        else:
+                            logger.debug(f"Skipping duplicate track {i}: {track_id}")
+                except Exception as track_error:
+                    logger.warning(f"Failed to format track {i}: {track_error}", exc_info=True)
+                    continue
+
+            logger.info(f"YouTube Music search for '{query}' returned {len(tracks)} unique tracks (filtered from {len(search_results)} total)")
             return tracks
-            
+
         except Exception as e:
-            logger.error(f"YouTube Music search error: {e}")
+            logger.error(f"YouTube Music search error: {e}", exc_info=True)
             # Fallback to regular YouTube search
             return await self.search(query, max_results)
     
@@ -93,10 +110,14 @@ class YouTubeService:
         """Скачивает трек"""
         try:
             video_id = track_info.get('id')
+            title = track_info.get('title', 'Unknown')
+
             if not video_id:
-                logger.error("No video ID provided for download")
+                logger.error(f"No video ID provided for download: {title}")
                 return False
-            
+
+            logger.info(f"Starting download: {title} (ID: {video_id})")
+
             # Настройки yt-dlp для скачивания с обходом блокировок
             ydl_opts = {
                 'format': 'bestaudio/best',
@@ -116,13 +137,12 @@ class YouTubeService:
                 'fragment_retries': 3,
                 'skip_unavailable_fragments': True,
             }
-            
+
             # Используем cookies если файл существует
             # ВАЖНО: НЕ используем player_client с cookies - они несовместимы!
             if self.cookies_file and os.path.exists(self.cookies_file):
                 ydl_opts['cookiefile'] = self.cookies_file
-                logger.info(f"✅ Cookies file found and loaded: {self.cookies_file}")
-                logger.info(f"🔐 Attempting download with authenticated session...")
+                logger.info(f"✅ Using cookies file: {self.cookies_file}")
             else:
                 # Если нет cookies, используем Android client
                 ydl_opts['extractor_args'] = {
@@ -131,18 +151,20 @@ class YouTubeService:
                         'player_skip': ['webpage'],
                     }
                 }
-                logger.warning("⚠️ No cookies file found - using Android client (may have limitations)")
-            
+                logger.info("Using Android client (no cookies)")
+
             url = f"https://www.youtube.com/watch?v={video_id}"
-            
+            logger.debug(f"Download URL: {url}")
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 await asyncio.get_event_loop().run_in_executor(
                     None, lambda: ydl.download([url])
                 )
-            
+
             # Проверяем, что файл создан
             if os.path.exists(output_path):
-                logger.info(f"Successfully downloaded: {track_info.get('title', 'Unknown')}")
+                file_size = os.path.getsize(output_path)
+                logger.info(f"✅ Successfully downloaded: {title} ({file_size} bytes)")
                 return True
             else:
                 # Ищем файл с другим расширением
@@ -153,21 +175,23 @@ class YouTubeService:
                         # Переименовываем в нужное расширение
                         if ext != 'mp3':
                             os.rename(alt_path, output_path)
-                            logger.info(f"Downloaded and renamed: {alt_path} -> {output_path}")
+                            logger.info(f"Downloaded and renamed: {ext} -> mp3")
+                        file_size = os.path.getsize(output_path)
+                        logger.info(f"✅ Successfully downloaded: {title} ({file_size} bytes)")
                         return True
-                
+
                 # Проверяем наличие .mhtml файла (ошибка скачивания)
                 mhtml_path = f"{base_path}.mhtml"
                 if os.path.exists(mhtml_path):
                     os.remove(mhtml_path)
-                    logger.error(f"Downloaded HTML page instead of video - cookies may be invalid or expired")
+                    logger.error(f"❌ Downloaded HTML instead of video - authentication issue")
                     return False
-                
-                logger.error(f"Download completed but file not found: {output_path}")
+
+                logger.error(f"❌ Download completed but file not found: {output_path}")
                 return False
-                
+
         except Exception as e:
-            logger.error(f"Download error for {track_info.get('title', 'Unknown')}: {e}")
+            logger.error(f"❌ Download error for {track_info.get('title', 'Unknown')}: {e}", exc_info=True)
             return False
     
     def _format_youtube_track(self, entry: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
@@ -202,31 +226,36 @@ class YouTubeService:
     def _format_ytmusic_track(self, result: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
         """Форматирует результат поиска YouTube Music"""
         try:
-            if not result.get('videoId'):
+            video_id = result.get('videoId')
+            if not video_id:
+                logger.warning(f"Track {index} has no videoId, skipping")
                 return None
-            
+
             title = result.get('title', 'Unknown Title')
             artists = result.get('artists', [])
             artist = artists[0]['name'] if artists else 'Unknown Artist'
             duration_text = result.get('duration', '0:00')
-            
+
             # Конвертируем длительность в секунды
             duration = self._parse_duration(duration_text)
-            
-            return {
-                'id': result['videoId'],
+
+            formatted = {
+                'id': video_id,
                 'title': title,
                 'artist': artist,
                 'duration': duration,
-                'quality': 'MP3 320kbps',
+                'quality': 'high',
                 'source': 'youtube_music',
-                'url': f"https://www.youtube.com/watch?v={result['videoId']}",
+                'url': f"https://www.youtube.com/watch?v={video_id}",
                 'thumbnail': result.get('thumbnails', [{}])[-1].get('url'),
                 'album': result.get('album', {}).get('name') if result.get('album') else None
             }
-            
+
+            logger.debug(f"Formatted YouTube Music track: {artist} - {title} (ID: {video_id}, duration: {duration}s)")
+            return formatted
+
         except Exception as e:
-            logger.warning(f"Error formatting YouTube Music track: {e}")
+            logger.error(f"Error formatting YouTube Music track {index}: {e}", exc_info=True)
             return None
     
     def _extract_artist_from_title(self, title: str) -> Optional[str]:
