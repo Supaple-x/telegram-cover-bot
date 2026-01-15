@@ -112,20 +112,20 @@ async def handle_source_selection(callback: CallbackQuery, state: FSMContext):
             parse_mode="Markdown"
         )
 
-@router.callback_query(F.data.startswith("page_"))
+@router.callback_query(F.data.startswith("page::"))
 async def handle_page_navigation(callback: CallbackQuery):
     """Обработчик навигации по страницам результатов"""
     try:
-        # Парсим данные: page_source_pagenum_query
-        parts = callback.data.split("_", 3)
+        # Парсим данные: page::source::pagenum::query
+        parts = callback.data.split("::", 3)
         if len(parts) < 4:
             await callback.answer("❌ Ошибка навигации")
             return
-            
+
         source = parts[1]
         page = int(parts[2])
         query = parts[3]
-        
+
         cache_key = f"{callback.from_user.id}_{source}_{query}"
         
         if cache_key not in search_cache:

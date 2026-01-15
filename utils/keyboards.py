@@ -70,19 +70,19 @@ def get_search_results_keyboard(tracks, page=0, total_pages=1, source="", query=
     # Кнопка "Назад" (если не первая страница)
     if page > 0:
         nav_buttons.append(
-            InlineKeyboardButton(text="◀️ Назад", callback_data=f"page_{source}_{page-1}_{query}")
+            InlineKeyboardButton(text="◀️ Назад", callback_data=f"page::{source}::{page-1}::{query}")
         )
-    
+
     # Индикатор страницы
     if total_pages > 1:
         nav_buttons.append(
             InlineKeyboardButton(text=f"Стр. {page+1}/{total_pages}", callback_data="noop")
         )
-    
+
     # Кнопка "Вперед" (если не последняя страница)
     if page < total_pages - 1:
         nav_buttons.append(
-            InlineKeyboardButton(text="Вперед ▶️", callback_data=f"page_{source}_{page+1}_{query}")
+            InlineKeyboardButton(text="Вперед ▶️", callback_data=f"page::{source}::{page+1}::{query}")
         )
     
     if nav_buttons:
