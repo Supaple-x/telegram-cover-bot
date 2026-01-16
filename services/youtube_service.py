@@ -118,7 +118,7 @@ class YouTubeService:
 
             logger.info(f"Starting download: {title} (ID: {video_id})")
 
-            # Настройки yt-dlp с улучшенным обходом блокировок (как YTDLnis)
+            # Настройки yt-dlp с PO Token для обхода bot detection
             ydl_opts = {
                 'format': 'bestaudio[ext=m4a]/bestaudio/best',  # Предпочитаем m4a
                 'outtmpl': output_path.replace('.mp3', '.%(ext)s'),
@@ -127,38 +127,37 @@ class YouTubeService:
                     'preferredcodec': AUDIO_FORMAT,
                     'preferredquality': AUDIO_QUALITY,
                 }],
-                'quiet': True,
-                'no_warnings': True,
+                'quiet': False,  # Включаем вывод для отладки
+                'no_warnings': False,
                 # Обход блокировок и защиты
                 'nocheckcertificate': True,
                 'geo_bypass': True,
                 'age_limit': None,
-                'force_ipv4': True,  # Принудительно IPv4
+                'force_ipv4': True,
                 # Улучшенная обработка ошибок и повторных попыток
                 'extractor_retries': 5,
-                'fragment_retries': 10,  # Увеличено с 5 до 10
+                'fragment_retries': 10,
                 'file_access_retries': 5,
-                'skip_unavailable_fragments': False,  # НЕ пропускаем фрагменты
+                'skip_unavailable_fragments': False,
                 'ignoreerrors': False,
-                'retries': 10,  # Общие retry
-                # Дополнительные опции для обхода ограничений
-                'socket_timeout': 60,  # Увеличено с 30 до 60
+                'retries': 10,
+                # Таймауты
+                'socket_timeout': 60,
                 'http_chunk_size': 10485760,  # 10MB chunks
-                'http_headers': {
-                    'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 13) gzip',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                },
             }
 
-            # Используем Android Music client (обходит большинство блокировок)
+            # Используем web клиенты с PO Token (bgutil HTTP server на порту 4416)
+            # НЕ пропускаем js - это нужно для PO Token
             ydl_opts['extractor_args'] = {
                 'youtube': {
-                    # android_music client обычно не требует авторизации
-                    'player_client': ['android_music', 'android', 'ios_music'],
-                    'player_skip': ['webpage', 'js', 'configs'],
+                    # web_safari и web клиенты работают с PO Token
+                    'player_client': ['web_safari', 'web'],
                 },
-                'youtubepot-bgutilhttp': {
-                    'base_url': 'http://localhost:4416'
+                'youtube:pot': {
+                    'clients': ['web_safari', 'web'],
+                },
+                'youtube:pot:bgutil:http': {
+                    'base_url': 'http://127.0.0.1:4416'
                 }
             }
 
