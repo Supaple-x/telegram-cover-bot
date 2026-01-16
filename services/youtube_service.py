@@ -120,30 +120,30 @@ class YouTubeService:
 
             # Настройки yt-dlp с PO Token для обхода bot detection
             ydl_opts = {
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',  # Предпочитаем m4a
+                # Предпочитаем https протокол (не m3u8/HLS) для избежания 403 на фрагментах
+                'format': 'bestaudio[protocol=https]/bestaudio[protocol=http]/bestaudio/best',
                 'outtmpl': output_path.replace('.mp3', '.%(ext)s'),
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': AUDIO_FORMAT,
                     'preferredquality': AUDIO_QUALITY,
                 }],
-                'quiet': False,  # Включаем вывод для отладки
+                'quiet': False,
                 'no_warnings': False,
-                # Обход блокировок и защиты
+                # Обход блокировок
                 'nocheckcertificate': True,
                 'geo_bypass': True,
                 'age_limit': None,
                 'force_ipv4': True,
-                # Улучшенная обработка ошибок и повторных попыток
+                # Retry настройки
                 'extractor_retries': 5,
                 'fragment_retries': 10,
                 'file_access_retries': 5,
                 'skip_unavailable_fragments': False,
                 'ignoreerrors': False,
                 'retries': 10,
-                # Таймауты
                 'socket_timeout': 60,
-                'http_chunk_size': 10485760,  # 10MB chunks
+                'http_chunk_size': 10485760,
             }
 
             # Используем web клиенты с PO Token (bgutil HTTP server на порту 4416)
