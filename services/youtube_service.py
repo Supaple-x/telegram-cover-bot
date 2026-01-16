@@ -146,20 +146,8 @@ class YouTubeService:
                 'http_chunk_size': 10485760,
             }
 
-            # Используем web клиенты с PO Token (bgutil HTTP server на порту 4416)
-            # НЕ пропускаем js - это нужно для PO Token
-            ydl_opts['extractor_args'] = {
-                'youtube': {
-                    # web_safari и web клиенты работают с PO Token
-                    'player_client': ['web_safari', 'web'],
-                },
-                'youtube:pot': {
-                    'clients': ['web_safari', 'web'],
-                },
-                'youtube:pot:bgutil:http': {
-                    'base_url': 'http://127.0.0.1:4416'
-                }
-            }
+            # НЕ указываем player_client - yt-dlp сам выберет лучший
+            # Это позволяет получить https форматы вместо m3u8/HLS
 
             # Если есть cookies, добавляем их
             if self.cookies_file and os.path.exists(self.cookies_file):
