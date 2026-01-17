@@ -3,7 +3,7 @@ python-dotenv==1.0.0
 yt-dlp==2023.12.30
 ytmusicapi==1.5.2
 vkpymusic==3.5.1
-yandex-music==2.1.1
+yandex-music==2.2.0
 aiofiles==23.2.1
 aiohttp==3.9.1
 beautifulsoup4==4.12.3
