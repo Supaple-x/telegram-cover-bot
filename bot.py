@@ -11,7 +11,7 @@ from aiogram.enums import ParseMode
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config import TELEGRAM_BOT_TOKEN, LOGS_DIR, DOWNLOADS_DIR, USE_LOCAL_BOT_API, LOCAL_BOT_API_URL
-from handlers import start, search, download
+from handlers import start, search, download, video
 
 # Настройка логирования
 def setup_logging():
@@ -78,7 +78,9 @@ async def create_bot_and_dispatcher():
     dp = Dispatcher(storage=MemoryStorage())
     
     # Регистрируем роутеры
+    # ВАЖНО: video router должен быть перед search, чтобы YouTube ссылки обрабатывались первыми
     dp.include_router(start.router)
+    dp.include_router(video.router)
     dp.include_router(search.router)
     dp.include_router(download.router)
     
