@@ -30,9 +30,15 @@ VIDEO_QUALITIES = {
 
 class YouTubeVideoService:
     def __init__(self):
-        self.cookies_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'youtube_cookies.txt')
-        if not os.path.exists(self.cookies_file):
-            self.cookies_file = None
+        self.cookies_file = None
+
+        # Проверяем наличие файла cookies
+        cookies_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'youtube_cookies.txt')
+        if os.path.exists(cookies_path):
+            self.cookies_file = cookies_path
+            logger.info(f"YouTube Video: cookies file found: {cookies_path}")
+        else:
+            logger.warning(f"YouTube Video: cookies file not found: {cookies_path}")
 
     def extract_video_id(self, url: str) -> Optional[str]:
         """Извлекает ID видео из YouTube URL"""
@@ -53,10 +59,18 @@ class YouTubeVideoService:
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': False,
+                # Обход блокировок
+                'nocheckcertificate': True,
+                'geo_bypass': True,
+                'age_limit': None,
+                # Retry настройки
+                'extractor_retries': 3,
+                'socket_timeout': 30,
             }
 
             if self.cookies_file:
                 ydl_opts['cookiefile'] = self.cookies_file
+                logger.info(f"Using cookies for video info: {self.cookies_file}")
 
             def _extract():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
