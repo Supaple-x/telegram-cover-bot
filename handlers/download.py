@@ -262,8 +262,14 @@ def get_download_service(source: str):
 
         return service
     elif source == "yandex_music":
-        # TODO: Реализовать Yandex Music сервис
-        return None
+        from services.yandex_service import YandexMusicService
+        service = YandexMusicService()
+
+        if not service.is_authenticated:
+            logger.error(f"Yandex Music not authenticated: {service.auth_error_message}")
+            return None
+
+        return service
     else:
         return None
 

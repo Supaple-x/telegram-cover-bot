@@ -172,8 +172,17 @@ async def perform_search(source: str, query: str):
             tracks, error_details = await service.search(query)
             return tracks, error_details
         elif source == "yandex_music":
-            # TODO: Реализовать Yandex Music поиск
-            return [], None
+            from services.yandex_service import YandexMusicService
+            service = YandexMusicService()
+
+            if not service.is_authenticated:
+                error_msg = f"Yandex Music: {service.auth_error_message}"
+                logger.error(f"Yandex Music not authenticated: {service.auth_error_message}")
+                return [], error_msg
+
+            # search возвращает кортеж (tracks, error_details)
+            tracks, error_details = await service.search(query)
+            return tracks, error_details
         else:
             logger.warning(f"Unknown source: {source}")
             return [], None
