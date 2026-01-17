@@ -214,7 +214,7 @@ async def download_and_send_track(message, source: str, track_info: Dict[str, An
             audio=audio_file,
             title=metadata['title'],
             performer=metadata['performer'],
-            duration=metadata.get('duration', 0)
+            duration=int(metadata.get('duration', 0))
         )
         
         # Показываем статус завершения
