@@ -10,7 +10,7 @@ from aiogram.enums import ParseMode
 # Добавляем текущую директорию в путь для импортов
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from config import TELEGRAM_BOT_TOKEN, LOGS_DIR, DOWNLOADS_DIR
+from config import TELEGRAM_BOT_TOKEN, LOGS_DIR, DOWNLOADS_DIR, USE_LOCAL_BOT_API, LOCAL_BOT_API_URL
 from handlers import start, search, download
 
 # Настройка логирования
@@ -48,12 +48,30 @@ async def create_bot_and_dispatcher():
     """Создает и настраивает бота и диспетчер"""
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN не установлен в переменных окружения")
-    
-    # Создаем бота
-    bot = Bot(
-        token=TELEGRAM_BOT_TOKEN,
-        parse_mode=ParseMode.MARKDOWN
-    )
+
+    logger = logging.getLogger(__name__)
+
+    # Настройка для локального Bot API (позволяет отправлять файлы до 2GB)
+    if USE_LOCAL_BOT_API:
+        from aiogram.client.session.aiohttp import AiohttpSession
+        from aiogram.client.telegram import TelegramAPIServer
+
+        local_server = TelegramAPIServer.from_base(LOCAL_BOT_API_URL)
+        session = AiohttpSession(api=local_server)
+
+        bot = Bot(
+            token=TELEGRAM_BOT_TOKEN,
+            parse_mode=ParseMode.MARKDOWN,
+            session=session
+        )
+        logger.info(f"Using local Bot API server: {LOCAL_BOT_API_URL}")
+    else:
+        # Стандартный режим через api.telegram.org
+        bot = Bot(
+            token=TELEGRAM_BOT_TOKEN,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        logger.info("Using standard Telegram Bot API")
 
     
     # Создаем диспетчер с хранилищем в памяти

@@ -6,6 +6,10 @@ load_dotenv()
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
+# Local Bot API (for files > 50MB)
+USE_LOCAL_BOT_API = os.getenv('USE_LOCAL_BOT_API', 'false').lower() == 'true'
+LOCAL_BOT_API_URL = os.getenv('LOCAL_BOT_API_URL', 'http://localhost:8081')
+
 # YouTube
 YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 
@@ -24,7 +28,7 @@ LOGS_DIR = os.path.join(BASE_DIR, 'logs')
 
 # Settings
 MAX_RESULTS_PER_PAGE = 5
-MAX_FILE_SIZE_MB = 50
+MAX_FILE_SIZE_MB = 2000 if USE_LOCAL_BOT_API else 50  # 2GB with local API, 50MB otherwise
 AUDIO_FORMAT = 'mp3'
 AUDIO_QUALITY = '320'
 
