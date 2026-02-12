@@ -104,7 +104,7 @@ async def on_startup(bot: Bot):
         BotCommand(command="start", description="🎵 Начать работу с ботом"),
         BotCommand(command="help", description="🆘 Помощь и инструкции"),
         BotCommand(command="about", description="ℹ️ О боте"),
-        BotCommand(command="upload_cookies", description="🍪 Загрузить YouTube cookies"),
+        BotCommand(command="cookies", description="🍪 Обновить YouTube cookies"),
     ]
     
     await bot.set_my_commands(commands)

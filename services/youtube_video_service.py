@@ -2,12 +2,15 @@ import asyncio
 import logging
 import os
 import re
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable, Tuple
 import yt_dlp
 
 from config import DOWNLOADS_DIR
 
 logger = logging.getLogger(__name__)
+
+# WARP прокси для обхода блокировок YouTube
+WARP_PROXY = 'socks5h://127.0.0.1:40000'
 
 # Паттерны для YouTube ссылок
 YOUTUBE_URL_PATTERNS = [
@@ -20,6 +23,7 @@ YOUTUBE_URL_PATTERNS = [
 
 # Доступные качества видео
 VIDEO_QUALITIES = {
+    'audio': {'format': 'bestaudio/best', 'label': '🎵 Только аудио (MP3)', 'audio_only': True},
     '360p': {'format': 'bestvideo[height<=360]+bestaudio/best[height<=360]', 'label': '360p (SD)'},
     '480p': {'format': 'bestvideo[height<=480]+bestaudio/best[height<=480]', 'label': '480p (SD)'},
     '720p': {'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]', 'label': '720p (HD)'},
@@ -63,6 +67,8 @@ class YouTubeVideoService:
                 'nocheckcertificate': True,
                 'geo_bypass': True,
                 'age_limit': None,
+                # WARP прокси
+                'proxy': WARP_PROXY,
                 # Retry настройки
                 'extractor_retries': 3,
                 'socket_timeout': 30,
@@ -82,7 +88,7 @@ class YouTubeVideoService:
                 return None
 
             # Определяем доступные качества
-            available_qualities = self._get_available_qualities(info)
+            available_qualities, quality_sizes = self._get_available_qualities(info)
 
             return {
                 'id': info.get('id'),
@@ -93,6 +99,7 @@ class YouTubeVideoService:
                 'thumbnail': info.get('thumbnail'),
                 'url': url,
                 'available_qualities': available_qualities,
+                'quality_sizes': quality_sizes,
                 'is_short': '/shorts/' in url or info.get('duration', 0) <= 60,
             }
 
@@ -100,29 +107,81 @@ class YouTubeVideoService:
             logger.error(f"Error getting video info: {e}", exc_info=True)
             return None
 
-    def _get_available_qualities(self, info: Dict) -> List[str]:
-        """Определяет доступные качества для видео"""
+    def _get_available_qualities(self, info: Dict) -> Tuple[List[str], Dict[str, int]]:
+        """Определяет доступные качества и примерные размеры для видео"""
         formats = info.get('formats', [])
         heights = set()
+        duration = info.get('duration', 0)
+
+        # Collect best video+audio filesize per height
+        video_sizes: Dict[int, int] = {}  # height -> best filesize
+        best_audio_size = 0
 
         for fmt in formats:
             height = fmt.get('height')
             if height:
                 heights.add(height)
+                size = fmt.get('filesize') or fmt.get('filesize_approx') or 0
+                vcodec = fmt.get('vcodec', 'none')
+                acodec = fmt.get('acodec', 'none')
 
-        available = []
+                if vcodec != 'none' and acodec == 'none':
+                    # Video-only stream
+                    if height not in video_sizes or size > video_sizes[height]:
+                        video_sizes[height] = size
+                elif vcodec != 'none' and acodec != 'none':
+                    # Combined stream
+                    if height not in video_sizes or size > video_sizes[height]:
+                        video_sizes[height] = size
+
+            # Track best audio size
+            if fmt.get('acodec', 'none') != 'none' and fmt.get('vcodec', 'none') == 'none':
+                asize = fmt.get('filesize') or fmt.get('filesize_approx') or 0
+                if asize > best_audio_size:
+                    best_audio_size = asize
+
+        available = ['audio']  # Audio always available
+        quality_sizes: Dict[str, int] = {}
+
+        # Audio size
+        if best_audio_size:
+            quality_sizes['audio'] = best_audio_size
+        elif duration > 0:
+            quality_sizes['audio'] = int(192_000 * duration / 8)  # ~192kbps estimate
+
         for quality in ['360p', '480p', '720p', '1080p']:
             target_height = int(quality[:-1])
-            # Качество доступно, если есть формат с такой или большей высотой
             if any(h >= target_height for h in heights):
                 available.append(quality)
+                # Find closest height >= target
+                matching = [h for h in sorted(heights) if h >= target_height]
+                if matching:
+                    closest = matching[0]
+                    vsize = video_sizes.get(closest, 0)
+                    if vsize:
+                        quality_sizes[quality] = vsize + best_audio_size
+                    elif duration > 0:
+                        # Rough estimate: bitrate * duration
+                        bitrates = {'360p': 700_000, '480p': 1_200_000, '720p': 2_500_000, '1080p': 5_000_000}
+                        quality_sizes[quality] = int(bitrates.get(quality, 1_000_000) * duration / 8)
 
-        # Всегда добавляем "best"
         available.append('best')
+        # Best quality = largest video + audio
+        if video_sizes:
+            quality_sizes['best'] = max(video_sizes.values()) + best_audio_size
+        elif duration > 0:
+            quality_sizes['best'] = int(5_000_000 * duration / 8)
 
-        return available
+        return available, quality_sizes
 
-    async def download(self, url: str, quality: str, output_dir: str = None) -> Optional[str]:
+    async def download(
+        self,
+        url: str,
+        quality: str,
+        output_dir: str = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        is_cancelled: Optional[Callable[[], bool]] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         Скачивает видео с YouTube
 
@@ -130,9 +189,11 @@ class YouTubeVideoService:
             url: YouTube URL
             quality: Качество видео (360p, 480p, 720p, 1080p, best)
             output_dir: Директория для сохранения
+            progress_callback: Функция обратного вызова для отображения прогресса
+                              Получает словарь с ключами: downloaded_bytes, total_bytes, speed, eta
 
         Returns:
-            Путь к скачанному файлу или None при ошибке
+            Tuple[file_path, error_message] - путь к файлу или None, сообщение об ошибке или None
         """
         try:
             if output_dir is None:
@@ -145,20 +206,57 @@ class YouTubeVideoService:
 
             output_template = os.path.join(output_dir, '%(title)s.%(ext)s')
 
+            # Progress hook для yt-dlp
+            def progress_hook(d):
+                # Check if download was cancelled
+                if is_cancelled and is_cancelled():
+                    raise yt_dlp.utils.DownloadCancelled("Download cancelled by user")
+
+                if d['status'] == 'downloading' and progress_callback:
+                    progress_info = {
+                        'status': 'downloading',
+                        'downloaded_bytes': d.get('downloaded_bytes', 0),
+                        'total_bytes': d.get('total_bytes') or d.get('total_bytes_estimate', 0),
+                        'speed': d.get('speed', 0),
+                        'eta': d.get('eta', 0),
+                        'filename': d.get('filename', ''),
+                    }
+                    progress_callback(progress_info)
+                elif d['status'] == 'finished' and progress_callback:
+                    progress_callback({
+                        'status': 'finished',
+                        'filename': d.get('filename', ''),
+                    })
+
+            is_audio_only = VIDEO_QUALITIES.get(quality, {}).get('audio_only', False)
+
+            if is_audio_only:
+                postprocessors = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '320',
+                }]
+            else:
+                postprocessors = [{
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                }]
+
             ydl_opts = {
                 'format': format_spec,
                 'outtmpl': output_template,
-                'merge_output_format': 'mp4',
-                'quiet': False,
-                'no_warnings': False,
-                'postprocessors': [{
-                    'key': 'FFmpegVideoConvertor',
-                    'preferedformat': 'mp4',
-                }],
+                'merge_output_format': None if is_audio_only else 'mp4',
+                'quiet': True,
+                'no_warnings': True,
+                'postprocessors': postprocessors,
+                # WARP прокси
+                'proxy': WARP_PROXY,
                 # Retry настройки
                 'retries': 10,
                 'fragment_retries': 10,
                 'socket_timeout': 60,
+                # Progress hook
+                'progress_hooks': [progress_hook],
             }
 
             if self.cookies_file:
@@ -189,7 +287,7 @@ class YouTubeVideoService:
             if downloaded_file and os.path.exists(downloaded_file):
                 file_size = os.path.getsize(downloaded_file)
                 logger.info(f"Downloaded video: {downloaded_file} ({file_size / 1024 / 1024:.2f} MB)")
-                return downloaded_file
+                return downloaded_file, None
 
             # Ищем скачанный файл в директории
             for file in os.listdir(output_dir):
@@ -197,14 +295,32 @@ class YouTubeVideoService:
                     full_path = os.path.join(output_dir, file)
                     if os.path.getmtime(full_path) > asyncio.get_event_loop().time() - 60:
                         logger.info(f"Found downloaded video: {full_path}")
-                        return full_path
+                        return full_path, None
 
             logger.error("Downloaded file not found")
-            return None
+            return None, "Файл не найден после скачивания"
+
+        except yt_dlp.utils.DownloadCancelled:
+            logger.info(f"Download cancelled by user: {url}")
+            return None, "CANCELLED"
 
         except Exception as e:
             logger.error(f"Error downloading video: {e}", exc_info=True)
-            return None
+            error_msg = str(e)
+            # Извлекаем понятное сообщение об ошибке
+            if "cancelled" in error_msg.lower():
+                return None, "CANCELLED"
+            elif "403" in error_msg:
+                error_msg = "HTTP 403: Доступ запрещён (возможно, нужны свежие cookies)"
+            elif "404" in error_msg:
+                error_msg = "HTTP 404: Видео не найдено"
+            elif "Sign in" in error_msg or "age" in error_msg.lower():
+                error_msg = "Требуется авторизация (возрастное ограничение)"
+            elif "Private video" in error_msg:
+                error_msg = "Приватное видео"
+            elif "unavailable" in error_msg.lower():
+                error_msg = "Видео недоступно"
+            return None, error_msg
 
     def format_duration(self, seconds: int) -> str:
         """Форматирует длительность в читаемый формат"""

@@ -33,6 +33,9 @@ youtube_cookies.txt
 .DS_Store
 Thumbs.db
 
+# Tests
+test_*.py
+
 # Temporary files
 *.tmp
 *.bak
