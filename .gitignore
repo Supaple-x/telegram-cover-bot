@@ -36,6 +36,17 @@ Thumbs.db
 # Tests
 test_*.py
 
-# Temporary files
+# Temporary/debug files
 *.tmp
 *.bak
+server_logs.txt
+bgutil_check.txt
+ytdlp_test.txt
+fresh_logs.txt
+pip_check.txt
+pip_versions.txt
+*_check*.txt
+*_test*.txt
+*_logs.txt
+deploy_status.txt
+restart*.txt

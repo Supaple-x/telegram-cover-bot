@@ -1,7 +1,7 @@
 # Telegram Media Transfer Bot
 
 ## Overview
-Telegram bot for searching/downloading music and YouTube videos. Built with aiogram 3, yt-dlp, deployed on Hetzner VPS.
+Telegram bot for searching/downloading music and videos (YouTube, Rutube). Built with aiogram 3, yt-dlp, deployed on Hetzner VPS.
 
 ## Architecture
 
@@ -19,11 +19,11 @@ bot.py                          # Entry point, router registration, startup
 config.py                       # All config, messages, env vars
 handlers/
   start.py                      # /start, /help, /about, /cookies, file upload
-  video.py                      # YouTube URL handling, quality selection, download with progress
+  video.py                      # Video URL handling (YouTube, Rutube), quality selection, download with progress
   search.py                     # Music search across sources
   download.py                   # Music download callbacks
 services/
-  youtube_video_service.py      # yt-dlp wrapper for video downloads
+  youtube_video_service.py      # yt-dlp wrapper for video downloads (YouTube, Rutube)
   youtube_music_service.py      # YouTube Music search/download
   vk_music_service.py           # VK Music
   yandex_music_service.py       # Yandex Music
@@ -34,13 +34,16 @@ utils/
 
 ### Important Technical Details
 
-**YouTube Video Downloads** (`services/youtube_video_service.py`):
-- All YouTube requests go through WARP proxy (socks5h://127.0.0.1:40000)
-- Cookies file: `/opt/telegram-cover-bot/youtube_cookies.txt` (Netscape format)
-- PO Tokens provided by bgutil Docker container on port 4416
-- JS challenges solved by deno + yt-dlp-ejs package
+**Video Downloads** (`services/youtube_video_service.py`):
+- Supports YouTube and Rutube via yt-dlp
+- YouTube requests go through WARP proxy (socks5h://127.0.0.1:40000) with cookies and PO Tokens
+- Rutube requests go directly (no proxy, no cookies needed)
+- Cookies file: `/opt/telegram-cover-bot/youtube_cookies.txt` (Netscape format, YouTube only)
+- PO Tokens provided by bgutil Docker container on port 4416 (YouTube only)
+- JS challenges solved by deno + yt-dlp-ejs package (YouTube only)
 - Supports: video download (360p-1080p), audio-only (MP3 320kbps), cancel button, progress bar
 - download() returns Tuple[Optional[str], Optional[str]] — (file_path, error_message)
+- Platform detection: `detect_platform(url)` returns 'youtube' or 'rutube'
 
 **Cookies Management** (`handlers/start.py`):
 - `/cookies` command — two options: paste text (ytdlnis format) or upload file

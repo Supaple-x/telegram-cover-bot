@@ -21,6 +21,13 @@ YOUTUBE_URL_PATTERNS = [
     r'(?:https?://)?(?:m\.)?youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})',
 ]
 
+# Паттерны для Rutube ссылок
+RUTUBE_URL_PATTERNS = [
+    r'(?:https?://)?(?:www\.)?rutube\.ru/video/([a-f0-9]+)',
+    r'(?:https?://)?(?:www\.)?rutube\.ru/shorts/([a-f0-9]+)',
+    r'(?:https?://)?(?:www\.)?rutube\.ru/play/embed/([a-f0-9]+)',
+]
+
 # Доступные качества видео
 VIDEO_QUALITIES = {
     'audio': {'format': 'bestaudio/best', 'label': '🎵 Только аудио (MP3)', 'audio_only': True},
@@ -52,13 +59,43 @@ class YouTubeVideoService:
                 return match.group(1)
         return None
 
+    def extract_rutube_id(self, url: str) -> Optional[str]:
+        """Извлекает ID видео из Rutube URL"""
+        for pattern in RUTUBE_URL_PATTERNS:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return None
+
     def is_youtube_url(self, text: str) -> bool:
         """Проверяет, является ли текст YouTube ссылкой"""
         return self.extract_video_id(text) is not None
 
-    async def get_video_info(self, url: str) -> Optional[Dict[str, Any]]:
-        """Получает информацию о видео"""
+    def is_rutube_url(self, text: str) -> bool:
+        """Проверяет, является ли текст Rutube ссылкой"""
+        return self.extract_rutube_id(text) is not None
+
+    def is_supported_video_url(self, text: str) -> bool:
+        """Проверяет, является ли текст поддерживаемой видео-ссылкой"""
+        return self.is_youtube_url(text) or self.is_rutube_url(text)
+
+    def detect_platform(self, url: str) -> Optional[str]:
+        """Определяет платформу по URL"""
+        if self.is_youtube_url(url):
+            return 'youtube'
+        elif self.is_rutube_url(url):
+            return 'rutube'
+        return None
+
+    async def get_video_info(self, url: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Получает информацию о видео
+
+        Returns:
+            Tuple[video_info, error_message] - информация о видео или None, сообщение об ошибке или None
+        """
         try:
+            platform = self.detect_platform(url)
+
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
@@ -67,16 +104,17 @@ class YouTubeVideoService:
                 'nocheckcertificate': True,
                 'geo_bypass': True,
                 'age_limit': None,
-                # WARP прокси
-                'proxy': WARP_PROXY,
                 # Retry настройки
                 'extractor_retries': 3,
                 'socket_timeout': 30,
             }
 
-            if self.cookies_file:
-                ydl_opts['cookiefile'] = self.cookies_file
-                logger.info(f"Using cookies for video info: {self.cookies_file}")
+            # WARP прокси и cookies только для YouTube
+            if platform == 'youtube':
+                ydl_opts['proxy'] = WARP_PROXY
+                if self.cookies_file:
+                    ydl_opts['cookiefile'] = self.cookies_file
+                    logger.info(f"Using cookies for video info: {self.cookies_file}")
 
             def _extract():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -85,7 +123,7 @@ class YouTubeVideoService:
             info = await asyncio.get_event_loop().run_in_executor(None, _extract)
 
             if not info:
-                return None
+                return None, "Не удалось получить информацию о видео"
 
             # Определяем доступные качества
             available_qualities, quality_sizes = self._get_available_qualities(info)
@@ -98,14 +136,28 @@ class YouTubeVideoService:
                 'view_count': info.get('view_count', 0),
                 'thumbnail': info.get('thumbnail'),
                 'url': url,
+                'platform': platform,
                 'available_qualities': available_qualities,
                 'quality_sizes': quality_sizes,
                 'is_short': '/shorts/' in url or info.get('duration', 0) <= 60,
-            }
+            }, None
 
         except Exception as e:
             logger.error(f"Error getting video info: {e}", exc_info=True)
-            return None
+            error_msg = str(e)
+            if "reloaded" in error_msg.lower():
+                error_msg = "NEEDS_RELOAD"
+            elif "403" in error_msg:
+                error_msg = "HTTP 403: Доступ запрещён (возможно, нужны свежие cookies)"
+            elif "404" in error_msg:
+                error_msg = "HTTP 404: Видео не найдено"
+            elif "Sign in" in error_msg or "age" in error_msg.lower():
+                error_msg = "Требуется авторизация (возрастное ограничение)"
+            elif "Private video" in error_msg:
+                error_msg = "Приватное видео"
+            elif "unavailable" in error_msg.lower():
+                error_msg = "Видео недоступно"
+            return None, error_msg
 
     def _get_available_qualities(self, info: Dict) -> Tuple[List[str], Dict[str, int]]:
         """Определяет доступные качества и примерные размеры для видео"""
@@ -183,10 +235,10 @@ class YouTubeVideoService:
         is_cancelled: Optional[Callable[[], bool]] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Скачивает видео с YouTube
+        Скачивает видео (YouTube, Rutube)
 
         Args:
-            url: YouTube URL
+            url: Video URL (YouTube or Rutube)
             quality: Качество видео (360p, 480p, 720p, 1080p, best)
             output_dir: Директория для сохранения
             progress_callback: Функция обратного вызова для отображения прогресса
@@ -242,6 +294,8 @@ class YouTubeVideoService:
                     'preferedformat': 'mp4',
                 }]
 
+            platform = self.detect_platform(url)
+
             ydl_opts = {
                 'format': format_spec,
                 'outtmpl': output_template,
@@ -249,8 +303,6 @@ class YouTubeVideoService:
                 'quiet': True,
                 'no_warnings': True,
                 'postprocessors': postprocessors,
-                # WARP прокси
-                'proxy': WARP_PROXY,
                 # Retry настройки
                 'retries': 10,
                 'fragment_retries': 10,
@@ -259,9 +311,12 @@ class YouTubeVideoService:
                 'progress_hooks': [progress_hook],
             }
 
-            if self.cookies_file:
-                ydl_opts['cookiefile'] = self.cookies_file
-                logger.info(f"Using cookies file: {self.cookies_file}")
+            # WARP прокси и cookies только для YouTube
+            if platform == 'youtube':
+                ydl_opts['proxy'] = WARP_PROXY
+                if self.cookies_file:
+                    ydl_opts['cookiefile'] = self.cookies_file
+                    logger.info(f"Using cookies file: {self.cookies_file}")
 
             downloaded_file = None
 
@@ -290,8 +345,9 @@ class YouTubeVideoService:
                 return downloaded_file, None
 
             # Ищем скачанный файл в директории
+            search_ext = '.mp3' if is_audio_only else '.mp4'
             for file in os.listdir(output_dir):
-                if file.endswith('.mp4'):
+                if file.endswith(search_ext):
                     full_path = os.path.join(output_dir, file)
                     if os.path.getmtime(full_path) > asyncio.get_event_loop().time() - 60:
                         logger.info(f"Found downloaded video: {full_path}")

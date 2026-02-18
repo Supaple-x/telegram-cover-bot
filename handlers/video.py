@@ -24,6 +24,9 @@ def escape_html(text: str) -> str:
 # Кэш информации о видео
 video_cache: Dict[str, Dict[str, Any]] = {}
 
+# Кэш URL для retry: retry_key -> url
+retry_url_cache: Dict[str, str] = {}
+
 # Активные загрузки видео: download_key -> {"cancelled": False}
 active_video_downloads: Dict[str, Dict[str, Any]] = {}
 
@@ -31,38 +34,68 @@ active_video_downloads: Dict[str, Dict[str, Any]] = {}
 PROGRESS_UPDATE_INTERVAL = 3
 
 
-class YouTubeURLFilter(Filter):
-    """Фильтр для YouTube ссылок"""
+PLATFORM_NAMES = {
+    'youtube': 'YouTube',
+    'rutube': 'Rutube',
+}
+
+PLATFORM_ICONS = {
+    'youtube': '🎬',
+    'rutube': '📺',
+}
+
+
+class VideoURLFilter(Filter):
+    """Фильтр для поддерживаемых видео-ссылок (YouTube, Rutube)"""
 
     async def __call__(self, message: Message) -> bool:
         if not message.text:
             return False
         service = YouTubeVideoService()
-        return service.is_youtube_url(message.text)
+        return service.is_supported_video_url(message.text)
 
 
-@router.message(YouTubeURLFilter())
-async def handle_youtube_url(message: Message):
-    """Обработчик YouTube ссылок"""
+@router.message(VideoURLFilter())
+async def handle_video_url(message: Message):
+    """Обработчик видео-ссылок (YouTube, Rutube)"""
     url = message.text.strip()
     user_id = message.from_user.id
 
-    logger.info(f"User {user_id} sent YouTube URL: {url}")
+    service = YouTubeVideoService()
+    platform = service.detect_platform(url)
+    platform_name = PLATFORM_NAMES.get(platform, 'Video')
+
+    logger.info(f"User {user_id} sent {platform_name} URL: {url}")
 
     # Показываем статус загрузки
     status_msg = await message.answer("🔍 Получаю информацию о видео...")
 
     try:
-        service = YouTubeVideoService()
-
         # Получаем информацию о видео
-        video_info = await service.get_video_info(url)
+        video_info, info_error = await service.get_video_info(url)
 
         if not video_info:
-            await status_msg.edit_text(
-                "❌ Не удалось получить информацию о видео.\n"
-                "Проверьте ссылку или попробуйте позже."
-            )
+            if info_error == "NEEDS_RELOAD":
+                # PO Token ошибка — предлагаем повторить или перезапустить
+                retry_key = f"{user_id}_{hash(url) % 100000}"
+                retry_url_cache[retry_key] = url
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Повторить", callback_data=f"video_retry::{retry_key}")],
+                    [InlineKeyboardButton(text="♻️ Перезапустить бот", callback_data=f"video_restart::{retry_key}")],
+                ])
+                await status_msg.edit_text(
+                    "⚠️ <b>Ошибка YouTube: требуется перезагрузка</b>\n\n"
+                    "Попробуйте повторить запрос или перезапустить бот.",
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            else:
+                error_detail = escape_html(info_error or "Неизвестная ошибка")
+                await status_msg.edit_text(
+                    f"❌ Не удалось получить информацию о видео.\n\n"
+                    f"<code>{error_detail}</code>",
+                    parse_mode="HTML"
+                )
             return
 
         # Сохраняем в кэш
@@ -76,9 +109,10 @@ async def handle_youtube_url(message: Message):
         # Экранируем спецсимволы в названии и канале
         safe_title = escape_html(video_info['title'])
         safe_channel = escape_html(video_info['channel'])
+        icon = PLATFORM_ICONS.get(platform, '🎬')
 
         info_text = (
-            f"🎬 <b>{safe_title}</b>\n\n"
+            f"{icon} <b>{safe_title}</b>\n\n"
             f"📺 Канал: {safe_channel}\n"
             f"⏱ Длительность: {duration_str}\n"
             f"👁 Просмотры: {views_str}\n\n"
@@ -91,7 +125,7 @@ async def handle_youtube_url(message: Message):
         await status_msg.edit_text(info_text, reply_markup=keyboard, parse_mode="HTML")
 
     except Exception as e:
-        logger.error(f"Error handling YouTube URL: {e}", exc_info=True)
+        logger.error(f"Error handling {platform_name} URL: {e}", exc_info=True)
         error_text = escape_html(str(e)[:300])
         await status_msg.edit_text(
             f"❌ Произошла ошибка при обработке видео.\n\n"
@@ -199,6 +233,90 @@ async def handle_cancel_download(callback: CallbackQuery):
         await callback.answer("Загрузка уже завершена")
 
 
+@router.callback_query(F.data.startswith("video_retry::"))
+async def handle_video_retry(callback: CallbackQuery):
+    """Повторная попытка получить информацию о видео"""
+    retry_key = callback.data.replace("video_retry::", "")
+    url = retry_url_cache.get(retry_key)
+
+    if not url:
+        await callback.answer("❌ Ссылка устарела, отправьте заново")
+        return
+
+    await callback.answer("🔄 Повторяю...")
+    await callback.message.edit_text("🔍 Получаю информацию о видео...")
+
+    service = YouTubeVideoService()
+    platform = service.detect_platform(url)
+    user_id = callback.from_user.id
+
+    try:
+        video_info, info_error = await service.get_video_info(url)
+
+        if not video_info:
+            if info_error == "NEEDS_RELOAD":
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Повторить", callback_data=f"video_retry::{retry_key}")],
+                    [InlineKeyboardButton(text="♻️ Перезапустить бот", callback_data=f"video_restart::{retry_key}")],
+                ])
+                await callback.message.edit_text(
+                    "⚠️ <b>Снова ошибка. Рекомендуется перезапуск бота.</b>",
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            else:
+                error_detail = escape_html(info_error or "Неизвестная ошибка")
+                await callback.message.edit_text(
+                    f"❌ Не удалось получить информацию о видео.\n\n"
+                    f"<code>{error_detail}</code>",
+                    parse_mode="HTML"
+                )
+            return
+
+        # Успех — показываем выбор качества
+        cache_key = f"{user_id}_{video_info['id']}"
+        video_cache[cache_key] = video_info
+        retry_url_cache.pop(retry_key, None)
+
+        duration_str = service.format_duration(video_info['duration'])
+        views_str = service.format_views(video_info['view_count'])
+        safe_title = escape_html(video_info['title'])
+        safe_channel = escape_html(video_info['channel'])
+        icon = PLATFORM_ICONS.get(platform, '🎬')
+
+        info_text = (
+            f"{icon} <b>{safe_title}</b>\n\n"
+            f"📺 Канал: {safe_channel}\n"
+            f"⏱ Длительность: {duration_str}\n"
+            f"👁 Просмотры: {views_str}\n\n"
+            f"Выберите качество для скачивания:"
+        )
+
+        keyboard = create_quality_keyboard(video_info['id'], video_info['available_qualities'], video_info.get('quality_sizes'))
+        await callback.message.edit_text(info_text, reply_markup=keyboard, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error in video retry: {e}", exc_info=True)
+        await callback.message.edit_text("❌ Произошла ошибка при повторной попытке", parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("video_restart::"))
+async def handle_video_restart(callback: CallbackQuery):
+    """Перезапуск бота по кнопке"""
+    import subprocess
+
+    retry_key = callback.data.replace("video_restart::", "")
+    await callback.answer("♻️ Перезапускаю бот...")
+    await callback.message.edit_text(
+        "♻️ <b>Бот перезапускается...</b>\n\n"
+        "Отправьте ссылку повторно через несколько секунд.",
+        parse_mode="HTML"
+    )
+
+    retry_url_cache.pop(retry_key, None)
+    subprocess.Popen(["bash", "-c", "sleep 2 && systemctl restart telegram-cover-bot"])
+
+
 def format_size(bytes_count: int) -> str:
     """Форматирует размер в человекочитаемый формат"""
     if bytes_count < 1024:
@@ -271,12 +389,13 @@ async def download_and_send_video(message, video_info: Dict[str, Any], quality: 
                 percent = 0
 
             safe_title = escape_html(video_info['title'][:50])
+            icon = PLATFORM_ICONS.get(video_info.get('platform'), '🎬')
             cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⏹ Отменить загрузку", callback_data=f"video_stop::{download_key}")]
             ])
             progress_text = (
                 f"⏳ <b>Скачиваю видео...</b>\n\n"
-                f"🎬 {safe_title}...\n"
+                f"{icon} {safe_title}...\n"
                 f"📊 Качество: {VIDEO_QUALITIES.get(quality, {}).get('label', quality)}\n\n"
                 f"<code>[{bar}] {percent:.1f}%</code>\n"
                 f"📥 {size_info}\n"
@@ -367,7 +486,8 @@ async def download_and_send_video(message, video_info: Dict[str, Any], quality: 
         # Отправляем файл
         is_audio_only = VIDEO_QUALITIES.get(quality, {}).get('audio_only', False)
         send_file = FSInputFile(file_path)
-        caption = f"🎬 {safe_title}\n📺 {escape_html(video_info['channel'])}"
+        icon = PLATFORM_ICONS.get(video_info.get('platform'), '🎬')
+        caption = f"{icon} {safe_title}\n📺 {escape_html(video_info['channel'])}"
 
         if is_audio_only:
             await message.answer_audio(
@@ -391,7 +511,7 @@ async def download_and_send_video(message, video_info: Dict[str, Any], quality: 
         fmt_label = VIDEO_QUALITIES.get(quality, {}).get('label', quality)
         await message.edit_text(
             f"✅ <b>Готово!</b>\n\n"
-            f"🎬 {safe_title}\n"
+            f"{icon} {safe_title}\n"
             f"📊 {'Формат' if is_audio_only else 'Качество'}: {fmt_label}\n"
             f"📁 Размер: {file_size_mb:.1f} MB",
             parse_mode="HTML"
