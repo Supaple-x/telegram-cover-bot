@@ -5,7 +5,7 @@ import re
 from typing import Dict, Any, Optional, List, Callable, Tuple
 import yt_dlp
 
-from config import DOWNLOADS_DIR
+from config import DOWNLOADS_DIR, VK_LOGIN, VK_PASSWORD
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,15 @@ RUTUBE_URL_PATTERNS = [
     r'(?:https?://)?(?:www\.)?rutube\.ru/video/([a-f0-9]+)',
     r'(?:https?://)?(?:www\.)?rutube\.ru/shorts/([a-f0-9]+)',
     r'(?:https?://)?(?:www\.)?rutube\.ru/play/embed/([a-f0-9]+)',
+]
+
+# Паттерны для VK Video ссылок
+VK_VIDEO_URL_PATTERNS = [
+    r'(?:https?://)?(?:www\.)?vkvideo\.ru/video(-?\d+_\d+)',
+    r'(?:https?://)?(?:www\.)?vkvideo\.ru/clip(-?\d+_\d+)',
+    r'(?:https?://)?(?:www\.)?vk\.com/video(-?\d+_\d+)',
+    r'(?:https?://)?(?:www\.)?vk\.com/clip(-?\d+_\d+)',
+    r'(?:https?://)?(?:www\.)?vk\.com/video\?z=video(-?\d+_\d+)',
 ]
 
 # Доступные качества видео
@@ -67,6 +76,14 @@ class YouTubeVideoService:
                 return match.group(1)
         return None
 
+    def extract_vk_video_id(self, url: str) -> Optional[str]:
+        """Извлекает ID видео из VK Video URL"""
+        for pattern in VK_VIDEO_URL_PATTERNS:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return None
+
     def is_youtube_url(self, text: str) -> bool:
         """Проверяет, является ли текст YouTube ссылкой"""
         return self.extract_video_id(text) is not None
@@ -75,9 +92,13 @@ class YouTubeVideoService:
         """Проверяет, является ли текст Rutube ссылкой"""
         return self.extract_rutube_id(text) is not None
 
+    def is_vk_video_url(self, text: str) -> bool:
+        """Проверяет, является ли текст VK Video ссылкой"""
+        return self.extract_vk_video_id(text) is not None
+
     def is_supported_video_url(self, text: str) -> bool:
         """Проверяет, является ли текст поддерживаемой видео-ссылкой"""
-        return self.is_youtube_url(text) or self.is_rutube_url(text)
+        return self.is_youtube_url(text) or self.is_rutube_url(text) or self.is_vk_video_url(text)
 
     def detect_platform(self, url: str) -> Optional[str]:
         """Определяет платформу по URL"""
@@ -85,6 +106,8 @@ class YouTubeVideoService:
             return 'youtube'
         elif self.is_rutube_url(url):
             return 'rutube'
+        elif self.is_vk_video_url(url):
+            return 'vkvideo'
         return None
 
     async def get_video_info(self, url: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -116,11 +139,40 @@ class YouTubeVideoService:
                     ydl_opts['cookiefile'] = self.cookies_file
                     logger.info(f"Using cookies for video info: {self.cookies_file}")
 
-            def _extract():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            def _extract(opts):
+                with yt_dlp.YoutubeDL(opts) as ydl:
                     return ydl.extract_info(url, download=False)
 
-            info = await asyncio.get_event_loop().run_in_executor(None, _extract)
+            async def _extract_with_fallback(opts: dict) -> dict:
+                """Extract info, retrying with format='best' if format unavailable."""
+                try:
+                    return await asyncio.get_event_loop().run_in_executor(None, lambda: _extract(opts))
+                except Exception as e:
+                    if 'Requested format is not available' in str(e):
+                        logger.warning("Format unavailable, retrying with format='best'")
+                        fallback = {**opts, 'format': 'best'}
+                        return await asyncio.get_event_loop().run_in_executor(None, lambda: _extract(fallback))
+                    raise
+
+            info = None
+            if platform == 'vkvideo':
+                # Try without auth first to avoid login rate limits for public videos
+                try:
+                    info = await _extract_with_fallback(ydl_opts)
+                except Exception as e:
+                    err = str(e)
+                    if '429' in err:
+                        logger.warning("VK 429 without auth, waiting 5s and retrying...")
+                        await asyncio.sleep(5)
+                        info = await _extract_with_fallback(ydl_opts)
+                    elif VK_LOGIN and VK_PASSWORD and ('login' in err.lower() or 'sign in' in err.lower() or 'followers' in err.lower() or '403' in err):
+                        logger.info("VK video requires auth, retrying with credentials...")
+                        auth_opts = {**ydl_opts, 'username': VK_LOGIN, 'password': VK_PASSWORD}
+                        info = await _extract_with_fallback(auth_opts)
+                    else:
+                        raise
+            else:
+                info = await _extract_with_fallback(ydl_opts)
 
             if not info:
                 return None, "Не удалось получить информацию о видео"
@@ -147,14 +199,18 @@ class YouTubeVideoService:
             error_msg = str(e)
             if "reloaded" in error_msg.lower():
                 error_msg = "NEEDS_RELOAD"
+            elif "429" in error_msg:
+                error_msg = "HTTP 429: Слишком много запросов. Попробуйте через минуту"
             elif "403" in error_msg:
                 error_msg = "HTTP 403: Доступ запрещён (возможно, нужны свежие cookies)"
             elif "404" in error_msg:
                 error_msg = "HTTP 404: Видео не найдено"
-            elif "Sign in" in error_msg or "age" in error_msg.lower():
+            elif "Sign in" in error_msg or "age_limit" in error_msg.lower() or "age restrict" in error_msg.lower():
                 error_msg = "Требуется авторизация (возрастное ограничение)"
             elif "Private video" in error_msg:
                 error_msg = "Приватное видео"
+            elif "only available to followers" in error_msg.lower():
+                error_msg = "Видео доступно только подписчикам"
             elif "unavailable" in error_msg.lower():
                 error_msg = "Видео недоступно"
             return None, error_msg
@@ -235,10 +291,10 @@ class YouTubeVideoService:
         is_cancelled: Optional[Callable[[], bool]] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Скачивает видео (YouTube, Rutube)
+        Скачивает видео (YouTube, Rutube, VK Video)
 
         Args:
-            url: Video URL (YouTube or Rutube)
+            url: Video URL (YouTube, Rutube or VK Video)
             quality: Качество видео (360p, 480p, 720p, 1080p, best)
             output_dir: Директория для сохранения
             progress_callback: Функция обратного вызова для отображения прогресса
@@ -320,9 +376,9 @@ class YouTubeVideoService:
 
             downloaded_file = None
 
-            def _download():
+            def _download(opts=None):
                 nonlocal downloaded_file
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                with yt_dlp.YoutubeDL(opts or ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     if info:
                         # Получаем путь к скачанному файлу
@@ -336,7 +392,26 @@ class YouTubeVideoService:
                             safe_title = re.sub(r'[<>:"/\\|?*]', '', title)
                             downloaded_file = os.path.join(output_dir, f"{safe_title}.{ext}")
 
-            await asyncio.get_event_loop().run_in_executor(None, _download)
+            if platform == 'vkvideo':
+                # Try without auth first to avoid login rate limits for public videos
+                try:
+                    await asyncio.get_event_loop().run_in_executor(None, lambda: _download(ydl_opts))
+                except yt_dlp.utils.DownloadCancelled:
+                    raise
+                except Exception as e:
+                    err = str(e)
+                    if '429' in err:
+                        logger.warning("VK download 429, waiting 5s and retrying...")
+                        await asyncio.sleep(5)
+                        await asyncio.get_event_loop().run_in_executor(None, lambda: _download(ydl_opts))
+                    elif VK_LOGIN and VK_PASSWORD and ('login' in err.lower() or 'sign in' in err.lower() or 'followers' in err.lower() or '403' in err):
+                        logger.info("VK download requires auth, retrying with credentials...")
+                        auth_opts = {**ydl_opts, 'username': VK_LOGIN, 'password': VK_PASSWORD}
+                        await asyncio.get_event_loop().run_in_executor(None, lambda: _download(auth_opts))
+                    else:
+                        raise
+            else:
+                await asyncio.get_event_loop().run_in_executor(None, lambda: _download(ydl_opts))
 
             # Проверяем что файл существует
             if downloaded_file and os.path.exists(downloaded_file):
@@ -366,14 +441,18 @@ class YouTubeVideoService:
             # Извлекаем понятное сообщение об ошибке
             if "cancelled" in error_msg.lower():
                 return None, "CANCELLED"
+            elif "429" in error_msg:
+                error_msg = "HTTP 429: Слишком много запросов. Попробуйте через минуту"
             elif "403" in error_msg:
                 error_msg = "HTTP 403: Доступ запрещён (возможно, нужны свежие cookies)"
             elif "404" in error_msg:
                 error_msg = "HTTP 404: Видео не найдено"
-            elif "Sign in" in error_msg or "age" in error_msg.lower():
+            elif "Sign in" in error_msg or "age_limit" in error_msg.lower() or "age restrict" in error_msg.lower():
                 error_msg = "Требуется авторизация (возрастное ограничение)"
             elif "Private video" in error_msg:
                 error_msg = "Приватное видео"
+            elif "only available to followers" in error_msg.lower():
+                error_msg = "Видео доступно только подписчикам"
             elif "unavailable" in error_msg.lower():
                 error_msg = "Видео недоступно"
             return None, error_msg

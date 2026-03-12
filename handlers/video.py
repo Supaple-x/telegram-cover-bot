@@ -37,16 +37,18 @@ PROGRESS_UPDATE_INTERVAL = 3
 PLATFORM_NAMES = {
     'youtube': 'YouTube',
     'rutube': 'Rutube',
+    'vkvideo': 'VK Видео',
 }
 
 PLATFORM_ICONS = {
     'youtube': '🎬',
     'rutube': '📺',
+    'vkvideo': '📹',
 }
 
 
 class VideoURLFilter(Filter):
-    """Фильтр для поддерживаемых видео-ссылок (YouTube, Rutube)"""
+    """Фильтр для поддерживаемых видео-ссылок (YouTube, Rutube, VK Video)"""
 
     async def __call__(self, message: Message) -> bool:
         if not message.text:
@@ -57,7 +59,7 @@ class VideoURLFilter(Filter):
 
 @router.message(VideoURLFilter())
 async def handle_video_url(message: Message):
-    """Обработчик видео-ссылок (YouTube, Rutube)"""
+    """Обработчик видео-ссылок (YouTube, Rutube, VK Video)"""
     url = message.text.strip()
     user_id = message.from_user.id
 
